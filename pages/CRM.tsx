@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 import { User, UserSegment, LtvCategory, TimePeriod } from '../types';
 import { filterUsersByLtv } from '../services/ltvEngine';
 import { exportUsersToCsv } from '../utils/csvExporter';
-import { Search, MoreHorizontal, MessageCircle, TrendingUp, Gamepad2, Heart, Zap, Download, ThumbsUp, Users, MessageSquare, Share2, Clock, Filter } from 'lucide-react';
+import { Search, MoreHorizontal, MessageCircle, TrendingUp, Gamepad2, Heart, Zap, Download, ThumbsUp, Users, MessageSquare, Share2, Clock, Filter, Eye } from 'lucide-react';
+import UserProfileModal from '../components/UserProfileModal';
 
 interface CRMProps {
   users: User[];
@@ -11,7 +12,8 @@ interface CRMProps {
 
 const CRM: React.FC<CRMProps> = ({ users }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+
   // --- Filters State ---
   const [filterSegment, setFilterSegment] = useState<UserSegment | 'ALL'>('ALL');
   const [filterPeriod, setFilterPeriod] = useState<TimePeriod>('ALL');
@@ -189,7 +191,11 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {finalUsers.map((user) => (
-                <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                <tr 
+                    key={user.id} 
+                    className="hover:bg-gray-50 transition-colors cursor-pointer group"
+                    onClick={() => setSelectedUser(user)}
+                >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-3">
                       <div className="relative">
@@ -203,7 +209,7 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
                           )}
                       </div>
                       <div>
-                        <div className="font-semibold text-gray-900">{user.first_name} {user.last_name}</div>
+                        <div className="font-semibold text-gray-900 group-hover:text-pizza-red transition-colors">{user.first_name} {user.last_name}</div>
                         <div className="text-xs text-gray-500">ID: {user.vk_id}</div>
                       </div>
                     </div>
@@ -242,10 +248,18 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <div className="flex justify-end gap-2">
-                      <button className="p-2 text-gray-400 hover:text-pizza-red hover:bg-red-50 rounded-lg transition-colors" title="Написать сообщение">
-                         <MessageCircle size={18} />
+                      <button 
+                          onClick={(e) => { e.stopPropagation(); setSelectedUser(user); }}
+                          className="p-2 text-gray-400 hover:text-pizza-red hover:bg-red-50 rounded-lg transition-colors" 
+                          title="Профиль"
+                      >
+                         <Eye size={18} />
                       </button>
-                      <button className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors" title="Управление">
+                      <button 
+                          onClick={(e) => e.stopPropagation()} 
+                          className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors" 
+                          title="Управление"
+                      >
                          <MoreHorizontal size={18} />
                       </button>
                     </div>
@@ -265,6 +279,11 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
             <span>Показано {finalUsers.length} из {users.length} клиентов</span>
         </div>
       </div>
+
+      {/* MODAL */}
+      {selectedUser && (
+          <UserProfileModal user={selectedUser} onClose={() => setSelectedUser(null)} />
+      )}
     </div>
   );
 };

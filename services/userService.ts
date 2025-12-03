@@ -1,3 +1,4 @@
+
 import { User, UserHistoryItem, EventType, LtvCategory } from '../types';
 import { EVENT_CATEGORIES, EVENT_WEIGHTS } from './ltvEngine';
 import { mockCampaigns, mockGames } from './mockData';
