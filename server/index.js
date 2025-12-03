@@ -304,24 +304,39 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
     });
 };
 
-const fetchImageBuffer = (imageUrl) => new Promise((resolve, reject) => {
+const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
+    if (!imageUrl) return reject(new Error('Image URL not provided'));
+
     try {
         const url = new URL(imageUrl);
         const client = url.protocol === 'https:' ? https : http;
 
-        const request = client.get(url, (response) => {
+        const request = client.get({
+            hostname: url.hostname,
+            path: url.pathname + (url.search || ''),
+            protocol: url.protocol,
+            headers: {
+                'User-Agent': 'LG100-CampaignBot/1.0',
+                'Accept': 'image/*,*/*;q=0.8',
+            },
+        }, (response) => {
             if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                // Follow redirect once
-                return resolve(fetchImageBuffer(response.headers.location));
+                if (redirectDepth > 3) return reject(new Error('Too many redirects while fetching image'));
+                return resolve(fetchImageBuffer(response.headers.location, redirectDepth + 1));
             }
 
             if (response.statusCode !== 200) {
                 return reject(new Error(`Failed to fetch image. Status: ${response.statusCode}`));
             }
 
+            const contentType = response.headers['content-type'] || '';
             const chunks = [];
             response.on('data', (chunk) => chunks.push(chunk));
-            response.on('end', () => resolve(Buffer.concat(chunks)));
+            response.on('end', () => resolve({ buffer: Buffer.concat(chunks), contentType }));
+        });
+
+        request.setTimeout(15000, () => {
+            request.destroy(new Error('Image request timed out'));
         });
 
         request.on('error', reject);
@@ -330,12 +345,24 @@ const fetchImageBuffer = (imageUrl) => new Promise((resolve, reject) => {
     }
 });
 
+const pickExtension = (contentType = '', fallback = 'jpg') => {
+    if (contentType.includes('png')) return 'png';
+    if (contentType.includes('jpeg')) return 'jpg';
+    if (contentType.includes('jpg')) return 'jpg';
+    if (contentType.includes('gif')) return 'gif';
+    return fallback;
+};
+
 const uploadCampaignImage = async (imageUrl) => {
     if (!imageUrl) return null;
 
     try {
-        const buffer = await fetchImageBuffer(imageUrl);
-        const photo = await vk.upload.messagePhoto({ source: { value: buffer } });
+        const { buffer, contentType } = await fetchImageBuffer(imageUrl);
+        if (!buffer || buffer.length === 0) throw new Error('Empty image buffer');
+
+        const filename = `campaign.${pickExtension(contentType)}`;
+        const photo = await vk.upload.messagePhoto({ source: { value: buffer, filename } });
+
         if (photo?.owner_id && photo?.id) {
             return `photo${photo.owner_id}_${photo.id}`;
         }
