@@ -5,6 +5,9 @@ const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const path = require('path');
 const { createCanvas } = require('canvas');
+const https = require('https');
+const http = require('http');
+const { URL } = require('url');
 
 const TOKEN = process.env.VK_TOKEN;
 const PORT = process.env.PORT || 3005;
@@ -301,14 +304,37 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
     });
 };
 
+const fetchImageBuffer = (imageUrl) => new Promise((resolve, reject) => {
+    try {
+        const url = new URL(imageUrl);
+        const client = url.protocol === 'https:' ? https : http;
+
+        const request = client.get(url, (response) => {
+            if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                // Follow redirect once
+                return resolve(fetchImageBuffer(response.headers.location));
+            }
+
+            if (response.statusCode !== 200) {
+                return reject(new Error(`Failed to fetch image. Status: ${response.statusCode}`));
+            }
+
+            const chunks = [];
+            response.on('data', (chunk) => chunks.push(chunk));
+            response.on('end', () => resolve(Buffer.concat(chunks)));
+        });
+
+        request.on('error', reject);
+    } catch (err) {
+        reject(err);
+    }
+});
+
 const uploadCampaignImage = async (imageUrl) => {
     if (!imageUrl) return null;
 
     try {
-        const response = await fetch(imageUrl);
-        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-        const buffer = Buffer.from(await response.arrayBuffer());
-
+        const buffer = await fetchImageBuffer(imageUrl);
         const photo = await vk.upload.messagePhoto({ source: { value: buffer } });
         if (photo?.owner_id && photo?.id) {
             return `photo${photo.owner_id}_${photo.id}`;
