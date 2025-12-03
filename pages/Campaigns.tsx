@@ -35,6 +35,8 @@ const Campaigns: React.FC = () => {
         segment_target: newCampaign.segment as UserSegment | 'ALL',
         message: newCampaign.message,
         image_url: trimmedImage || undefined,
+        // Дублируем для обратной совместимости с разными полями
+        ...(trimmedImage ? { imageUrl: trimmedImage } : {} as any),
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
@@ -282,10 +284,10 @@ const Campaigns: React.FC = () => {
                           </span>
                       )}
                       <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold tracking-wide ${
-                          camp.status === 'SENT' ? 'border-green-200 text-green-700 bg-green-50' : 
+                          camp.status === 'SENT' ? 'border-green-200 text-green-700 bg-green-50' :
                           'border-gray-200 text-gray-500 bg-gray-50'
                       }`}>
-                          {camp.status === 'SENT' ? 'АКТИВНА' : 'ЧЕРНОВИК'}
+                          {camp.status === 'SENT' ? 'ОТПРАВЛЕНА' : 'ЧЕРНОВИК'}
                       </span>
                     </div>
                     <p className="text-sm text-gray-600 mb-3 truncate max-w-xl">{camp.message}</p>

@@ -304,11 +304,13 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
     });
 };
 
+const zlib = require('zlib');
+
 const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
     if (!imageUrl) return reject(new Error('Image URL not provided'));
 
     try {
-        const url = new URL(imageUrl);
+        const url = new URL(imageUrl.trim());
         const client = url.protocol === 'https:' ? https : http;
 
         const request = client.get({
@@ -318,6 +320,7 @@ const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, 
             path: url.pathname + (url.search || ''),
             headers: {
                 'Accept': 'image/*,*/*;q=0.8',
+                'Accept-Encoding': 'identity',
                 'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)',
                 'Host': url.hostname,
             },
@@ -333,9 +336,30 @@ const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, 
             }
 
             const contentType = response.headers['content-type'] || '';
+            const encoding = (response.headers['content-encoding'] || 'identity').toLowerCase();
             const chunks = [];
             response.on('data', (chunk) => chunks.push(chunk));
-            response.on('end', () => resolve({ buffer: Buffer.concat(chunks), contentType }));
+            response.on('end', () => {
+                const rawBuffer = Buffer.concat(chunks);
+
+                const finish = (buffer) => resolve({ buffer, contentType });
+
+                if (encoding === 'gzip') {
+                    return zlib.gunzip(rawBuffer, (err, decompressed) => {
+                        if (err) return reject(err);
+                        return finish(decompressed);
+                    });
+                }
+
+                if (encoding === 'deflate') {
+                    return zlib.inflate(rawBuffer, (err, decompressed) => {
+                        if (err) return reject(err);
+                        return finish(decompressed);
+                    });
+                }
+
+                return finish(rawBuffer);
+            });
         });
 
         request.setTimeout(15000, () => {
