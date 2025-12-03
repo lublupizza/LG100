@@ -30,7 +30,11 @@ export const hydrateCampaigns = (): Campaign[] => {
   try {
     const parsed = JSON.parse(stored) as Campaign[];
     if (Array.isArray(parsed)) {
-      mockCampaigns.splice(0, mockCampaigns.length, ...parsed);
+      const normalized = parsed.map((c: any) => ({
+        ...c,
+        image_url: c.image_url || c.imageUrl,
+      }));
+      mockCampaigns.splice(0, mockCampaigns.length, ...normalized);
     }
   } catch (e) {
     console.warn('Failed to hydrate campaigns from storage', e);
@@ -69,15 +73,15 @@ export const launchCampaign = async (
     const response = await fetch('/api/campaigns/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        campaignId: campaign.id,
-        message: campaign.message,
-        type: campaign.type,
-        segment: campaign.segment_target,
-        imageUrl: campaign.image_url,
-        filters,
-      }),
-    });
+        body: JSON.stringify({
+          campaignId: campaign.id,
+          message: campaign.message,
+          type: campaign.type,
+          segment: campaign.segment_target,
+          imageUrl: (campaign as any).imageUrl || campaign.image_url,
+          filters,
+        }),
+      });
 
     if (response.ok) {
       const data = await response.json();

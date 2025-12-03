@@ -316,8 +316,8 @@ const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, 
             path: url.pathname + (url.search || ''),
             protocol: url.protocol,
             headers: {
-                'User-Agent': 'LG100-CampaignBot/1.0',
                 'Accept': 'image/*,*/*;q=0.8',
+                'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)'
             },
         }, (response) => {
             if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
@@ -357,6 +357,15 @@ const uploadCampaignImage = async (imageUrl) => {
     if (!imageUrl) return null;
 
     try {
+        try {
+            const directPhoto = await vk.upload.messagePhoto({ source: { url: imageUrl } });
+            if (directPhoto?.owner_id && directPhoto?.id) {
+                return `photo${directPhoto.owner_id}_${directPhoto.id}`;
+            }
+        } catch (directErr) {
+            console.warn('Direct VK upload failed, fallback to buffer', directErr?.message || directErr);
+        }
+
         const { buffer, contentType } = await fetchImageBuffer(imageUrl);
         if (!buffer || buffer.length === 0) throw new Error('Empty image buffer');
 

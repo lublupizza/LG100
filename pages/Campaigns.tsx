@@ -266,6 +266,7 @@ const Campaigns: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-4">
         {filteredCampaigns.length > 0 ? filteredCampaigns.map(camp => {
+            const preview = (camp as any).imageUrl || camp.image_url;
             return (
               <div key={camp.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4 hover:border-red-200 transition-colors">
                 
@@ -294,8 +295,8 @@ const Campaigns: React.FC = () => {
                   </div>
 
                   <div className="pl-6 flex flex-col items-end gap-3">
-                    {camp.image_url && (
-                      <img src={camp.image_url} alt={camp.name} className="w-28 h-20 object-cover rounded border border-gray-200 shadow-sm" />
+                    {preview && (
+                      <img src={preview} alt={camp.name} className="w-28 h-20 object-cover rounded border border-gray-200 shadow-sm" />
                     )}
                     {camp.status === 'SCHEDULED' ? (
                          <button
