@@ -74,6 +74,7 @@ export const launchCampaign = async (
         message: campaign.message,
         type: campaign.type,
         segment: campaign.segment_target,
+        imageUrl: campaign.image_url,
         filters,
       }),
     });

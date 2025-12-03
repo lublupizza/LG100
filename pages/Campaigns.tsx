@@ -17,6 +17,7 @@ const Campaigns: React.FC = () => {
     type: CampaignType.STANDARD,
     segment: 'ALL',
     message: '',
+    imageUrl: '',
   });
 
   useEffect(() => {
@@ -32,6 +33,7 @@ const Campaigns: React.FC = () => {
         type: newCampaign.type,
         segment_target: newCampaign.segment as UserSegment | 'ALL',
         message: newCampaign.message,
+        image_url: newCampaign.imageUrl || undefined,
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
@@ -40,7 +42,7 @@ const Campaigns: React.FC = () => {
     localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
     setCampaigns([camp, ...campaigns]);
     setIsCreating(false);
-    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '' });
+    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '' });
   };
 
   const handleLaunch = async (id: string) => {
@@ -139,7 +141,7 @@ const Campaigns: React.FC = () => {
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">
                   {newCampaign.type === CampaignType.GAME_BATTLESHIP ? 'Стартовое сообщение игры' : 'Текст сообщения'}
               </label>
-              <textarea 
+              <textarea
                 required
                 rows={3}
                 className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all resize-none"
@@ -148,6 +150,29 @@ const Campaigns: React.FC = () => {
                 placeholder={newCampaign.type === CampaignType.GAME_BATTLESHIP ? "Капитан, враг на горизонте! Пиши A1 чтобы стрелять..." : "Текст..."}
               />
             </div>
+
+            {newCampaign.type === CampaignType.STANDARD && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Картинка (опционально)</label>
+                  <input
+                    type="url"
+                    placeholder="https://...jpg"
+                    value={newCampaign.imageUrl}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, imageUrl: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Вставьте прямую ссылку на изображение, чтобы отправить пуш с картинкой.</p>
+                </div>
+                <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg h-full min-h-[120px] flex items-center justify-center px-3 py-2 text-xs text-gray-500">
+                  {newCampaign.imageUrl ? (
+                    <img src={newCampaign.imageUrl} alt="Превью" className="max-h-28 rounded" />
+                  ) : (
+                    <span>Превью появится, когда добавите ссылку</span>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button 
@@ -268,9 +293,12 @@ const Campaigns: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="pl-6">
+                  <div className="pl-6 flex flex-col items-end gap-3">
+                    {camp.image_url && (
+                      <img src={camp.image_url} alt={camp.name} className="w-28 h-20 object-cover rounded border border-gray-200 shadow-sm" />
+                    )}
                     {camp.status === 'SCHEDULED' ? (
-                         <button 
+                         <button
                             onClick={() => handleLaunch(camp.id)}
                             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors"
                          >

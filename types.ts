@@ -81,6 +81,7 @@ export interface Campaign {
   type: CampaignType;
   segment_target: UserSegment | 'ALL';
   message: string;
+  image_url?: string;
   status: 'DRAFT' | 'SENT' | 'SCHEDULED';
   target_post_id?: number;
   stats: CampaignStats;

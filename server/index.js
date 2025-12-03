@@ -302,7 +302,7 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
-    const { campaignId, message, type, segment = 'ALL', filters = {} } = req.body || {};
+    const { campaignId, message, type, segment = 'ALL', imageUrl, filters = {} } = req.body || {};
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
@@ -322,6 +322,7 @@ app.post('/api/campaigns/send', async (req, res) => {
                 user_id: user.vkId,
                 random_id: Date.now() + Math.floor(Math.random() * 100000),
                 message: intro,
+                attachment: imageUrl ? imageUrl : undefined,
             });
 
             sent += 1;
