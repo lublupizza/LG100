@@ -8,7 +8,7 @@ const { createCanvas } = require('canvas');
 
 const TOKEN = process.env.VK_TOKEN;
 const PORT = process.env.PORT || 3005;
-const recipients = require('./data/recipients');
+const staticRecipients = require('./data/recipients');
 
 if (!TOKEN) {
   console.error('ERROR: VK_TOKEN not found');
@@ -273,9 +273,28 @@ app.get('/api/users', async (req, res) => res.json(await prisma.user.findMany({ 
 app.get('/api/dashboard', (req, res) => res.json({ kpi: {}, charts: {}, lists: {} }));
 
 // === Рассылки ===
-const filterRecipients = (segment, filters = {}) => {
-    return recipients.filter(r => {
-        if (segment && segment !== 'ALL' && r.segment !== segment) return false;
+const loadRecipients = async () => {
+    // Берём реальные контакты из базы, если есть хоть один пользователь
+    const users = await prisma.user.findMany({ include: { games: true } });
+
+    if (users.length > 0) {
+        return users.map((u) => ({
+            vkId: u.vkId,
+            // Минимальная информация для фильтров
+            games_played: (u.games || []).length,
+            // Пока нет поля в БД — считаем подписчиком, чтобы не отсечь аудиторию
+            is_member: true,
+            segment: 'ALL',
+        }));
+    }
+
+    // Фолбэк на статичный список для локального стенда
+    return staticRecipients;
+};
+
+const filterRecipients = (rawRecipients, segment, filters = {}) => {
+    return rawRecipients.filter((r) => {
+        if (segment && segment !== 'ALL' && r.segment && r.segment !== segment) return false;
         if (typeof filters.min_games === 'number' && r.games_played < filters.min_games) return false;
         if (typeof filters.is_member === 'boolean' && r.is_member !== filters.is_member) return false;
         return true;
@@ -287,7 +306,7 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
-    const audience = filterRecipients(segment, filters);
+    const audience = filterRecipients(await loadRecipients(), segment, filters);
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
     let sent = 0;
