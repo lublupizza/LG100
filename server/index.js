@@ -312,17 +312,20 @@ const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, 
         const client = url.protocol === 'https:' ? https : http;
 
         const request = client.get({
-            hostname: url.hostname,
-            path: url.pathname + (url.search || ''),
             protocol: url.protocol,
+            hostname: url.hostname,
+            port: url.port || undefined,
+            path: url.pathname + (url.search || ''),
             headers: {
                 'Accept': 'image/*,*/*;q=0.8',
-                'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)'
+                'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)',
+                'Host': url.hostname,
             },
         }, (response) => {
             if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 if (redirectDepth > 3) return reject(new Error('Too many redirects while fetching image'));
-                return resolve(fetchImageBuffer(response.headers.location, redirectDepth + 1));
+                const redirectUrl = new URL(response.headers.location, url);
+                return resolve(fetchImageBuffer(redirectUrl.toString(), redirectDepth + 1));
             }
 
             if (response.statusCode !== 200) {
@@ -383,14 +386,14 @@ const uploadCampaignImage = async (imageUrl) => {
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
-    const { campaignId, message, type, segment = 'ALL', imageUrl, filters = {} } = req.body || {};
+    const { campaignId, message, type, segment = 'ALL', imageUrl, image_url, filters = {} } = req.body || {};
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
     const audience = filterRecipients(await loadRecipients(), segment, filters);
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
-    const photoAttachment = await uploadCampaignImage(imageUrl);
+    const photoAttachment = await uploadCampaignImage(imageUrl || image_url);
     let sent = 0;
     const errors = [];
 

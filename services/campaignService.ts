@@ -30,10 +30,16 @@ export const hydrateCampaigns = (): Campaign[] => {
   try {
     const parsed = JSON.parse(stored) as Campaign[];
     if (Array.isArray(parsed)) {
-      const normalized = parsed.map((c: any) => ({
-        ...c,
-        image_url: c.image_url || c.imageUrl,
-      }));
+      const normalized = parsed.map((c: any) => {
+        const image = c.image_url || c.imageUrl;
+        return {
+          ...c,
+          image_url: image,
+          // сохраняем дублирующее поле, чтобы старые записи корректно показывали превью
+          imageUrl: image,
+        };
+      });
+
       mockCampaigns.splice(0, mockCampaigns.length, ...normalized);
     }
   } catch (e) {
@@ -79,6 +85,7 @@ export const launchCampaign = async (
           type: campaign.type,
           segment: campaign.segment_target,
           imageUrl: (campaign as any).imageUrl || campaign.image_url,
+          image_url: (campaign as any).imageUrl || campaign.image_url,
           filters,
         }),
       });
@@ -122,6 +129,20 @@ export const launchCampaign = async (
     if (mockUser && Math.random() > 0.7) {
         registerEvent(mockUser, EventType.PUSH_OPEN, { campaign_id: campaign.id });
     }
+  } catch (e) {
+    // Если API недоступен, fallback на моковую отправку
+    sentCount = filteredMockUsers.length;
+  }
+
+  const recipients = recipientsFromApi.length
+    ? recipientsFromApi
+    : filteredMockUsers.map((u) => ({ userId: u.id, vkId: u.vk_id, segment: u.segment }));
+
+  if (recipients.length === 0) return null;
+
+  if (sentCount === 0) {
+    sentCount = recipients.length;
+  }
 
     if (campaign.type === CampaignType.GAME_BATTLESHIP && mockUser) {
       SeaBattleSessionManager.startSession(mockUser.id, campaign.id);

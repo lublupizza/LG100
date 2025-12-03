@@ -27,13 +27,14 @@ const Campaigns: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmedImage = newCampaign.imageUrl.trim();
     const camp: Campaign = {
         id: `c${Date.now()}`,
         name: newCampaign.name,
         type: newCampaign.type,
         segment_target: newCampaign.segment as UserSegment | 'ALL',
         message: newCampaign.message,
-        image_url: newCampaign.imageUrl || undefined,
+        image_url: trimmedImage || undefined,
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
