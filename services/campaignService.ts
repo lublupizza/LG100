@@ -6,24 +6,65 @@ import { registerEvent } from './ltvEngine';
 import { recordCampaignSend } from './campaignTrackingService';
 import { isDateInPeriod } from '../utils/dateHelpers';
 
-export const launchCampaign = (campaign: Campaign): Campaign | null => {
+type CampaignFilter = {
+  segment_target?: UserSegment | 'ALL';
+  min_games?: number;
+  is_member?: boolean;
+};
+
+export const launchCampaign = async (
+  campaign: Campaign,
+  filters: CampaignFilter = {}
+): Promise<Campaign | null> => {
   // Если кампании нет, смысла продолжать нет
   if (!campaign) return null;
 
   // 1. Отбор аудитории
   const targetUsers = mockUsers.filter(u => {
-    if (campaign.segment_target === 'ALL') return true;
-    return u.segment === campaign.segment_target;
+    if (filters.segment_target && filters.segment_target !== 'ALL') {
+      if (u.segment !== filters.segment_target) return false;
+    } else if (campaign.segment_target !== 'ALL' && u.segment !== campaign.segment_target) {
+      return false;
+    }
+
+    if (typeof filters.min_games === 'number' && u.games_played < filters.min_games) return false;
+    if (typeof filters.is_member === 'boolean' && u.social_stats?.is_member !== filters.is_member) return false;
+
+    return true;
   });
 
   if (targetUsers.length === 0) return null;
 
   // 2. Рассылка / Активация
   let sentCount = 0;
-  
-  targetUsers.forEach(user => {
-    sentCount++;
 
+  // 2a. Отправка реальным пользователям через бэкенд
+  try {
+    const response = await fetch('/api/campaigns/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        campaignId: campaign.id,
+        message: campaign.message,
+        type: campaign.type,
+        segment: campaign.segment_target,
+        filters,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      sentCount = data.sent ?? targetUsers.length;
+    } else {
+      sentCount = targetUsers.length;
+    }
+  } catch (e) {
+    // Если API недоступен, fallback на моковую отправку
+    sentCount = targetUsers.length;
+  }
+
+  // 2b. Трекинг и игровые сессии для аналитики
+  targetUsers.forEach(user => {
     // === NEW: Фиксируем отправку в системе трекинга ===
     recordCampaignSend(campaign.id, user.id);
 

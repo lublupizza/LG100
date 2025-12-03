@@ -8,6 +8,7 @@ const { createCanvas } = require('canvas');
 
 const TOKEN = process.env.VK_TOKEN;
 const PORT = process.env.PORT || 3005;
+const recipients = require('./data/recipients');
 
 if (!TOKEN) {
   console.error('ERROR: VK_TOKEN not found');
@@ -270,6 +271,48 @@ vk.updates.on('message_new', async (ctx) => {
 
 app.get('/api/users', async (req, res) => res.json(await prisma.user.findMany({ include: { games: true } })));
 app.get('/api/dashboard', (req, res) => res.json({ kpi: {}, charts: {}, lists: {} }));
+
+// === Рассылки ===
+const filterRecipients = (segment, filters = {}) => {
+    return recipients.filter(r => {
+        if (segment && segment !== 'ALL' && r.segment !== segment) return false;
+        if (typeof filters.min_games === 'number' && r.games_played < filters.min_games) return false;
+        if (typeof filters.is_member === 'boolean' && r.is_member !== filters.is_member) return false;
+        return true;
+    });
+};
+
+app.post('/api/campaigns/send', async (req, res) => {
+    const { campaignId, message, type, segment = 'ALL', filters = {} } = req.body || {};
+
+    if (!message) return res.status(400).json({ error: 'Message is required' });
+
+    const audience = filterRecipients(segment, filters);
+    if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
+
+    let sent = 0;
+    const errors = [];
+
+    for (const user of audience) {
+        try {
+            const intro = type === 'GAME_BATTLESHIP'
+                ? `${message}\n\n🏴‍☠️ Начни игру: напиши "Старт" или координату (например A1)`
+                : message;
+
+            await vk.api.messages.send({
+                user_id: user.vkId,
+                random_id: Date.now() + Math.floor(Math.random() * 100000),
+                message: intro,
+            });
+
+            sent += 1;
+        } catch (err) {
+            errors.push({ user: user.vkId, message: err?.message || 'send_failed' });
+        }
+    }
+
+    res.json({ sent, failed: errors.length, errors });
+});
 
 async function start() {
     await vk.updates.start();
