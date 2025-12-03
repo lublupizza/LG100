@@ -37,10 +37,13 @@ const Campaigns: React.FC = () => {
   };
 
   const handleLaunch = (id: string) => {
+    const campaign = campaigns.find(c => c.id === id);
+    if (!campaign) return;
+
     if(confirm('Запустить рассылку сейчас?')) {
-        const success = launchCampaign(id);
-        if(success) {
-            setCampaigns([...mockCampaigns]); 
+        const updatedCampaign = launchCampaign(campaign);
+        if (updatedCampaign) {
+            setCampaigns(prev => prev.map(c => c.id === id ? updatedCampaign : c));
         }
     }
   };
