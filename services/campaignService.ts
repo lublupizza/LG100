@@ -56,6 +56,16 @@ export const launchCampaign = async (
   // Если кампании нет, смысла продолжать нет
   if (!campaign) return null;
 
+  // Нормализуем ссылку на изображение один раз
+  const image = ((campaign as any).imageUrl || campaign.image_url || '').trim();
+
+  // Проставляем нормализованную картинку в объект, чтобы сохранить при обновлении
+  const hydratedCampaign: Campaign = {
+    ...campaign,
+    image_url: image || undefined,
+    ...(image ? { imageUrl: image } : { imageUrl: undefined } as any),
+  };
+
   // 1. Отбор аудитории
   const filteredMockUsers = mockUsers.filter(u => {
     if (filters.segment_target && filters.segment_target !== 'ALL') {
@@ -84,8 +94,8 @@ export const launchCampaign = async (
           message: campaign.message,
           type: campaign.type,
           segment: campaign.segment_target,
-          imageUrl: (campaign as any).imageUrl || campaign.image_url,
-          image_url: (campaign as any).imageUrl || campaign.image_url,
+          imageUrl: image,
+          image_url: image,
           filters,
         }),
       });
@@ -129,20 +139,6 @@ export const launchCampaign = async (
     if (mockUser && Math.random() > 0.7) {
         registerEvent(mockUser, EventType.PUSH_OPEN, { campaign_id: campaign.id });
     }
-  } catch (e) {
-    // Если API недоступен, fallback на моковую отправку
-    sentCount = filteredMockUsers.length;
-  }
-
-  const recipients = recipientsFromApi.length
-    ? recipientsFromApi
-    : filteredMockUsers.map((u) => ({ userId: u.id, vkId: u.vk_id, segment: u.segment }));
-
-  if (recipients.length === 0) return null;
-
-  if (sentCount === 0) {
-    sentCount = recipients.length;
-  }
 
     if (campaign.type === CampaignType.GAME_BATTLESHIP && mockUser) {
       SeaBattleSessionManager.startSession(mockUser.id, campaign.id);
@@ -168,7 +164,7 @@ export const launchCampaign = async (
     : baseStats;
 
   const updatedCampaign: Campaign = {
-    ...campaign,
+    ...hydratedCampaign,
     status: 'SENT',
     stats: updatedStats
   };

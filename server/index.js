@@ -306,6 +306,9 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
 
 const zlib = require('zlib');
 
+// Кэшируем уже загруженные вложения, чтобы не дергать загрузку при повторных отправках
+const uploadedCampaignPhotos = new Map();
+
 const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
     if (!imageUrl) return reject(new Error('Image URL not provided'));
 
@@ -381,26 +384,35 @@ const pickExtension = (contentType = '', fallback = 'jpg') => {
 };
 
 const uploadCampaignImage = async (imageUrl) => {
-    if (!imageUrl) return null;
+    const cleanUrl = (imageUrl || '').trim();
+    if (!cleanUrl || (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://'))) return null;
+
+    if (uploadedCampaignPhotos.has(cleanUrl)) {
+        return uploadedCampaignPhotos.get(cleanUrl);
+    }
 
     try {
         try {
-            const directPhoto = await vk.upload.messagePhoto({ source: { url: imageUrl } });
+            const directPhoto = await vk.upload.messagePhoto({ source: { url: cleanUrl } });
             if (directPhoto?.owner_id && directPhoto?.id) {
-                return `photo${directPhoto.owner_id}_${directPhoto.id}`;
+                const attachment = `photo${directPhoto.owner_id}_${directPhoto.id}`;
+                uploadedCampaignPhotos.set(cleanUrl, attachment);
+                return attachment;
             }
         } catch (directErr) {
             console.warn('Direct VK upload failed, fallback to buffer', directErr?.message || directErr);
         }
 
-        const { buffer, contentType } = await fetchImageBuffer(imageUrl);
+        const { buffer, contentType } = await fetchImageBuffer(cleanUrl);
         if (!buffer || buffer.length === 0) throw new Error('Empty image buffer');
 
         const filename = `campaign.${pickExtension(contentType)}`;
         const photo = await vk.upload.messagePhoto({ source: { value: buffer, filename } });
 
         if (photo?.owner_id && photo?.id) {
-            return `photo${photo.owner_id}_${photo.id}`;
+            const attachment = `photo${photo.owner_id}_${photo.id}`;
+            uploadedCampaignPhotos.set(cleanUrl, attachment);
+            return attachment;
         }
     } catch (err) {
         console.error('Image upload failed', err);
@@ -417,7 +429,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     const audience = filterRecipients(await loadRecipients(), segment, filters);
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
-    const photoAttachment = await uploadCampaignImage(imageUrl || image_url);
+    const photoAttachment = await uploadCampaignImage((imageUrl || image_url || '').trim());
     let sent = 0;
     const errors = [];
 

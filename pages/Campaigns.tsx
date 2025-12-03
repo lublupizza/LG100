@@ -28,15 +28,16 @@ const Campaigns: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedImage = newCampaign.imageUrl.trim();
+    const normalizedImage = trimmedImage || undefined;
     const camp: Campaign = {
         id: `c${Date.now()}`,
         name: newCampaign.name,
         type: newCampaign.type,
         segment_target: newCampaign.segment as UserSegment | 'ALL',
         message: newCampaign.message,
-        image_url: trimmedImage || undefined,
+        image_url: normalizedImage,
         // Дублируем для обратной совместимости с разными полями
-        ...(trimmedImage ? { imageUrl: trimmedImage } : {} as any),
+        ...(normalizedImage ? { imageUrl: normalizedImage } : { imageUrl: undefined } as any),
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
@@ -65,6 +66,27 @@ const Campaigns: React.FC = () => {
 
   const filteredCampaigns = campaigns.filter(c => isDateInPeriod(c.created_at, period));
   const globalFunnel = getCampaignFunnelForPeriod(period);
+
+  const statusView = (status: Campaign['status']) => {
+    if (status === 'SENT') {
+      return {
+        label: 'ОТПРАВЛЕНА',
+        styles: 'border-green-200 text-green-700 bg-green-50',
+      };
+    }
+
+    if (status === 'SCHEDULED') {
+      return {
+        label: 'АКТИВНА',
+        styles: 'border-blue-200 text-blue-700 bg-blue-50',
+      };
+    }
+
+    return {
+      label: 'ЧЕРНОВИК',
+      styles: 'border-gray-200 text-gray-500 bg-gray-50',
+    };
+  };
 
   return (
     <div className="space-y-6">
@@ -269,7 +291,8 @@ const Campaigns: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-4">
         {filteredCampaigns.length > 0 ? filteredCampaigns.map(camp => {
-            const preview = (camp as any).imageUrl || camp.image_url;
+            const preview = ((camp as any).imageUrl || camp.image_url || '').trim();
+            const badge = statusView(camp.status);
             return (
               <div key={camp.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4 hover:border-red-200 transition-colors">
                 
@@ -283,11 +306,8 @@ const Campaigns: React.FC = () => {
                               <Gamepad2 size={10} /> МОРСКОЙ БОЙ
                           </span>
                       )}
-                      <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold tracking-wide ${
-                          camp.status === 'SENT' ? 'border-green-200 text-green-700 bg-green-50' :
-                          'border-gray-200 text-gray-500 bg-gray-50'
-                      }`}>
-                          {camp.status === 'SENT' ? 'ОТПРАВЛЕНА' : 'ЧЕРНОВИК'}
+                      <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold tracking-wide ${badge.styles}`}>
+                          {badge.label}
                       </span>
                     </div>
                     <p className="text-sm text-gray-600 mb-3 truncate max-w-xl">{camp.message}</p>
