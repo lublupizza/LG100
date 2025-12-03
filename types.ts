@@ -124,6 +124,16 @@ export interface User {
   source: string;
 }
 
+export interface UserHistoryItem {
+  id: string;
+  type: EventType;
+  category: LtvCategory;
+  date: string;
+  description: string;
+  value_change: number;
+  metadata?: any;
+}
+
 export interface GameSession {
   id: string;
   user_id: number;
