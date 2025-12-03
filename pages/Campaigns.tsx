@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Campaign, UserSegment, CampaignType, TimePeriod } from '../types';
 import { mockCampaigns } from '../services/mockData';
 import { launchCampaign, recalculateGameStats } from '../services/campaignService';
-import { getCampaignFunnel } from '../services/campaignTrackingService';
+import { getCampaignFunnelForPeriod } from '../services/campaignTrackingService';
 import { Send, Plus, Calendar, Gamepad2, Play, Clock, Eye, Activity, Flame, ChevronRight } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
 
@@ -51,6 +51,7 @@ const Campaigns: React.FC = () => {
   };
 
   const filteredCampaigns = campaigns.filter(c => isDateInPeriod(c.created_at, period));
+  const globalFunnel = getCampaignFunnelForPeriod(period);
 
   return (
     <div className="space-y-6">
@@ -159,11 +160,79 @@ const Campaigns: React.FC = () => {
         </div>
       )}
 
+      <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-bold text-gray-700 uppercase">Успешные рассылки ({period === 'ALL' ? 'за все время' : period})</h4>
+          <span className="text-xs text-gray-400">Сводка по всем отправленным пушам</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="bg-gray-100 rounded-lg p-3 relative overflow-hidden group border border-gray-300">
+            <div className="absolute right-0 top-0 h-full w-1.5 bg-gray-400" />
+            <div className="text-2xl font-bold text-gray-800">{globalFunnel.recipients_total}</div>
+            <div className="text-[10px] text-gray-600 font-bold uppercase flex items-center gap-1 mt-1">
+              <Send size={10}/> Отправлено
+            </div>
+          </div>
+
+          <div className="bg-yellow-50 rounded-lg p-3 relative overflow-hidden group border border-yellow-200">
+            <div className="absolute right-0 top-0 h-full w-1.5 bg-yellow-400" />
+            <div className="text-2xl font-bold text-gray-900">
+              {globalFunnel.views}
+              <span className="text-sm text-yellow-700 font-medium ml-1">({globalFunnel.view_conversion}%)</span>
+            </div>
+            <div className="text-[10px] text-yellow-700 font-bold uppercase flex items-center gap-1 mt-1">
+              <Eye size={10}/> Просмотрено
+            </div>
+          </div>
+
+          <div className="bg-orange-100 rounded-lg p-3 relative overflow-hidden group border border-orange-300">
+            <div className="absolute right-0 top-0 h-full w-1.5 bg-orange-500" />
+            <div className="text-2xl font-bold text-gray-900">
+              {globalFunnel.actions_total}
+              <span className="text-sm text-orange-800 font-medium ml-1">({globalFunnel.action_conversion}%)</span>
+            </div>
+            <div className="text-[10px] text-orange-800 font-bold uppercase flex items-center gap-1 mt-1">
+              <Activity size={10}/> Действие
+            </div>
+          </div>
+
+          <div className="bg-red-50 rounded-lg p-3 relative overflow-hidden group border border-red-200">
+            <div className="absolute right-0 top-0 h-full w-1.5 bg-pizza-red" />
+            <div className="text-2xl font-bold text-gray-900">
+              {globalFunnel.warm_hot_count}
+              <span className="text-sm text-pizza-red font-bold ml-1">({globalFunnel.warm_hot_from_acted}%)</span>
+            </div>
+            <div className="text-[10px] text-pizza-red font-bold uppercase flex items-center gap-1 mt-1">
+              <Flame size={10}/> Warm / Hot
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-[10px] font-bold text-gray-400 uppercase">Детализация действий</span>
+            <span className="text-[10px] text-gray-400">Ср. время реакции: {globalFunnel.avg_delay_seconds} сек.</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(globalFunnel.actions_by_type).length > 0 ? (
+              Object.entries(globalFunnel.actions_by_type).map(([type, count]) => (
+                <span key={type} className="inline-flex items-center gap-1.5 bg-white px-2.5 py-1 rounded border border-gray-200 text-xs font-medium text-gray-700 shadow-sm">
+                  {type === 'game_start' && <Gamepad2 size={12} className="text-purple-500"/>}
+                  {type === 'push_open' && <Eye size={12} className="text-blue-500"/>}
+                  <span>{type}:</span>
+                  <span className="font-bold text-pizza-red">{count}</span>
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-gray-400 italic">Действий пока нет</span>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 gap-4">
         {filteredCampaigns.length > 0 ? filteredCampaigns.map(camp => {
-            // Рассчитываем полную воронку
-            const funnel = getCampaignFunnel(camp.id, period);
-            
             return (
               <div key={camp.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4 hover:border-red-200 transition-colors">
                 
@@ -207,85 +276,6 @@ const Campaigns: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Funnel Block */}
-                {camp.status === 'SENT' && (
-                  <div className="border-t border-gray-100 pt-4">
-                    <h5 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
-                        Воронка прогрева ({period === 'ALL' ? 'За все время' : period})
-                    </h5>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                        
-                        {/* 1. Отправлено (Нейтральный серый #E0E0E0 style) */}
-                        <div className="bg-gray-100 rounded-lg p-3 relative overflow-hidden group border border-gray-300">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-gray-400"></div>
-                             <div className="text-2xl font-bold text-gray-800">{funnel.recipients_total}</div>
-                             <div className="text-[10px] text-gray-600 font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Send size={10}/> Отправлено
-                             </div>
-                        </div>
-
-                        {/* 2. Увидели (Мягкий желтый #FFF3CD style) */}
-                        <div className="bg-yellow-50 rounded-lg p-3 relative overflow-hidden group border border-yellow-200">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-yellow-400"></div>
-                             <div className="text-2xl font-bold text-gray-900">
-                                 {funnel.views}
-                                 <span className="text-sm text-yellow-700 font-medium ml-1">({funnel.view_conversion}%)</span>
-                             </div>
-                             <div className="text-[10px] text-yellow-700 font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Eye size={10}/> Просмотрено
-                             </div>
-                        </div>
-
-                        {/* 3. Действие (Оранжевый #FFC107 style) */}
-                        <div className="bg-orange-100 rounded-lg p-3 relative overflow-hidden group border border-orange-300">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-orange-500"></div>
-                             <div className="text-2xl font-bold text-gray-900">
-                                 {funnel.actions_total}
-                                 <span className="text-sm text-orange-800 font-medium ml-1">({funnel.action_conversion}%)</span>
-                             </div>
-                             <div className="text-[10px] text-orange-800 font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Activity size={10}/> Действие
-                             </div>
-                        </div>
-
-                        {/* 4. Warm/Hot (Брендовый красный) */}
-                        <div className="bg-red-50 rounded-lg p-3 relative overflow-hidden group border border-red-200">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-pizza-red"></div>
-                             <div className="text-2xl font-bold text-gray-900">
-                                 {funnel.warm_hot_count}
-                                 <span className="text-sm text-pizza-red font-bold ml-1">({funnel.warm_hot_from_acted}%)</span>
-                             </div>
-                             <div className="text-[10px] text-pizza-red font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Flame size={10}/> Warm / Hot
-                             </div>
-                        </div>
-
-                    </div>
-                    
-                    {/* Action Breakdown Table */}
-                    <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
-                         <div className="flex justify-between items-center mb-2">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase">Детализация действий</span>
-                            <span className="text-[10px] text-gray-400">Ср. время реакции: {funnel.avg_delay_seconds} сек.</span>
-                         </div>
-                         <div className="flex flex-wrap gap-2">
-                             {Object.entries(funnel.actions_by_type).length > 0 ? (
-                                 Object.entries(funnel.actions_by_type).map(([type, count]) => (
-                                     <span key={type} className="inline-flex items-center gap-1.5 bg-white px-2.5 py-1 rounded border border-gray-200 text-xs font-medium text-gray-700 shadow-sm">
-                                         {type === 'game_start' && <Gamepad2 size={12} className="text-purple-500"/>}
-                                         {type === 'push_open' && <Eye size={12} className="text-blue-500"/>}
-                                         <span>{type}:</span>
-                                         <span className="font-bold text-pizza-red">{count}</span>
-                                     </span>
-                                 ))
-                             ) : (
-                                 <span className="text-xs text-gray-400 italic">Действий пока нет</span>
-                             )}
-                         </div>
-                    </div>
-                  </div>
-                )}
               </div>
             );
         }) : (

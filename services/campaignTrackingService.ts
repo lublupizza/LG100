@@ -178,3 +178,64 @@ export const getCampaignFunnel = (campaignId: string, period: TimePeriod = 'ALL'
         warm_hot_from_acted: actedSends.length > 0 ? Math.round((warmHotCount / actedSends.length) * 100) : 0
     };
 };
+
+/**
+ * 5. Воронка по всем кампаниям за период
+ * Используется в админке как сводка "успешных рассылок" без привязки к конкретной кампании
+ */
+export const getCampaignFunnelForPeriod = (period: TimePeriod = 'ALL'): CampaignFunnelStats => {
+    const sends = mockCampaignSends.filter((s) => period === 'ALL' || isDateInPeriod(s.sent_at, period));
+    const total = sends.length;
+
+    if (total === 0) {
+        return {
+            recipients_total: 0,
+            views: 0,
+            view_conversion: 0,
+            actions_total: 0,
+            action_conversion: 0,
+            avg_delay_seconds: 0,
+            actions_by_type: {},
+            warm_hot_count: 0,
+            warm_hot_rate: 0,
+            warm_hot_from_acted: 0,
+        };
+    }
+
+    const viewedSends = sends.filter((s) => s.viewed_at && isDateInPeriod(s.viewed_at, period));
+    const actedSends = sends.filter((s) => s.first_action_at && isDateInPeriod(s.first_action_at, period));
+
+    let warmHotCount = 0;
+    actedSends.forEach((s) => {
+        const user = mockUsers.find((u) => u.id === s.user_id || u.vk_id === s.user_vk_id);
+        const segment = s.segment ?? user?.segment;
+        if (segment === UserSegment.WARM || segment === UserSegment.HOT) {
+            warmHotCount++;
+        }
+    });
+
+    const actionsByType: Record<string, number> = {};
+    let totalDelay = 0;
+
+    actedSends.forEach((s) => {
+        if (s.first_action_type) {
+            actionsByType[s.first_action_type] = (actionsByType[s.first_action_type] || 0) + 1;
+        }
+        if (s.first_action_at && s.sent_at) {
+            totalDelay += new Date(s.first_action_at).getTime() - new Date(s.sent_at).getTime();
+        }
+    });
+
+    return {
+        recipients_total: total,
+        views: viewedSends.length,
+        view_conversion: Math.round((viewedSends.length / total) * 100),
+        actions_total: actedSends.length,
+        action_conversion: Math.round((actedSends.length / total) * 100),
+        avg_delay_seconds: actedSends.length > 0 ? Math.round(totalDelay / actedSends.length / 1000) : 0,
+        actions_by_type: actionsByType,
+        warm_hot_count: warmHotCount,
+        warm_hot_rate: Math.round((warmHotCount / total) * 100),
+        warm_hot_from_acted: actedSends.length > 0 ? Math.round((warmHotCount / actedSends.length) * 100) : 0,
+    };
+};
