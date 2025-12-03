@@ -36,11 +36,16 @@ const Campaigns: React.FC = () => {
     setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '' });
   };
 
-  const handleLaunch = (id: string) => {
+  const handleLaunch = async (id: string) => {
+    const campaign = campaigns.find(c => c.id === id);
+    if (!campaign) return;
+
     if(confirm('Запустить рассылку сейчас?')) {
-        const success = launchCampaign(id);
-        if(success) {
-            setCampaigns([...mockCampaigns]); 
+        const updatedCampaign = await launchCampaign(campaign, {
+          segment_target: campaign.segment_target,
+        });
+        if (updatedCampaign) {
+            setCampaigns(prev => prev.map(c => c.id === id ? updatedCampaign : c));
         }
     }
   };
