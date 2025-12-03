@@ -5,9 +5,13 @@ const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const path = require('path');
 const { createCanvas } = require('canvas');
+const https = require('https');
+const http = require('http');
+const { URL } = require('url');
 
 const TOKEN = process.env.VK_TOKEN;
 const PORT = process.env.PORT || 3005;
+const staticRecipients = require('./data/recipients');
 
 if (!TOKEN) {
   console.error('ERROR: VK_TOKEN not found');
@@ -117,30 +121,47 @@ class SeaBattleGame {
     return board;
   }
   static getShipCells(board, x, y) {
+    const isShipPart = (cx, cy) => [CellState.SHIP, CellState.HIT, CellState.KILLED].includes(board[cy]?.[cx]);
+    const stack = [[x, y]];
+    const visited = new Set();
     const cells = [];
-    const traverse = (cx, cy) => {
-        const cell = board[cy]?.[cx];
-        if (cell === CellState.SHIP || cell === CellState.HIT || cell === CellState.KILLED) {
-            // Простая проверка без рекурсии для демо или полная
-            // Здесь упростим, чтобы код влез
-        }
-    };
-    // Используем упрощенную проверку победы для надежности вставки
-    return []; 
+
+    while (stack.length) {
+        const [cx, cy] = stack.pop();
+        const key = `${cx}:${cy}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+
+        if (!isShipPart(cx, cy)) continue;
+        cells.push({ x: cx, y: cy });
+
+        stack.push([cx + 1, cy]);
+        stack.push([cx - 1, cy]);
+        stack.push([cx, cy + 1]);
+        stack.push([cx, cy - 1]);
+    }
+
+    return cells;
   }
-  
+
   // Полная логика выстрела
   static processShot(board, x, y) {
     const cell = board[y][x];
     if (cell === CellState.MISS || cell === CellState.HIT || cell === CellState.KILLED) return { res: 'Сюда уже стреляли!', win: false };
     if (cell === CellState.EMPTY) { board[y][x] = CellState.MISS; return { res: 'Мимо!', win: false }; }
-    
+
     if (cell === CellState.SHIP) {
         board[y][x] = CellState.HIT;
-        
-        // Проверка на убийство (упрощенная: если нет соседних SHIP той же линии)
-        // В продакшене тут нужен полный getShipCells
-        
+
+        const shipCells = SeaBattleGame.getShipCells(board, x, y);
+        const shipKilled = shipCells.every(({ x: cx, y: cy }) =>
+            [CellState.HIT, CellState.KILLED].includes(board[cy][cx])
+        );
+
+        if (shipKilled) {
+            shipCells.forEach(({ x: cx, y: cy }) => board[cy][cx] = CellState.KILLED);
+        }
+
         const hasShips = board.some(row => row.includes(CellState.SHIP));
         if (!hasShips) {
              // Красим все HIT в KILLED при победе
@@ -149,6 +170,8 @@ class SeaBattleGame {
              }
              return { res: 'ПОБЕДА! 🎉', win: true };
         }
+
+        if (shipKilled) return { res: 'Корабль уничтожен! ☠️', win: false };
         return { res: 'Попал! 🔥', win: false };
     }
     return { res: 'Ошибка', win: false };
@@ -251,6 +274,161 @@ vk.updates.on('message_new', async (ctx) => {
 
 app.get('/api/users', async (req, res) => res.json(await prisma.user.findMany({ include: { games: true } })));
 app.get('/api/dashboard', (req, res) => res.json({ kpi: {}, charts: {}, lists: {} }));
+
+// === Рассылки ===
+const loadRecipients = async () => {
+    // Берём реальные контакты из базы, если есть хоть один пользователь
+    const users = await prisma.user.findMany({ include: { games: true } });
+
+    if (users.length > 0) {
+        return users.map((u) => ({
+            vkId: u.vkId,
+            // Минимальная информация для фильтров
+            games_played: (u.games || []).length,
+            // Пока нет поля в БД — считаем подписчиком, чтобы не отсечь аудиторию
+            is_member: true,
+            segment: 'ALL',
+        }));
+    }
+
+    // Фолбэк на статичный список для локального стенда
+    return staticRecipients;
+};
+
+const filterRecipients = (rawRecipients, segment, filters = {}) => {
+    return rawRecipients.filter((r) => {
+        if (segment && segment !== 'ALL' && r.segment && r.segment !== segment) return false;
+        if (typeof filters.min_games === 'number' && r.games_played < filters.min_games) return false;
+        if (typeof filters.is_member === 'boolean' && r.is_member !== filters.is_member) return false;
+        return true;
+    });
+};
+
+const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
+    if (!imageUrl) return reject(new Error('Image URL not provided'));
+
+    try {
+        const url = new URL(imageUrl);
+        const client = url.protocol === 'https:' ? https : http;
+
+        const request = client.get({
+            hostname: url.hostname,
+            path: url.pathname + (url.search || ''),
+            protocol: url.protocol,
+            headers: {
+                'Accept': 'image/*,*/*;q=0.8',
+                'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)'
+            },
+        }, (response) => {
+            if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                if (redirectDepth > 3) return reject(new Error('Too many redirects while fetching image'));
+                return resolve(fetchImageBuffer(response.headers.location, redirectDepth + 1));
+            }
+
+            if (response.statusCode !== 200) {
+                return reject(new Error(`Failed to fetch image. Status: ${response.statusCode}`));
+            }
+
+            const contentType = response.headers['content-type'] || '';
+            const chunks = [];
+            response.on('data', (chunk) => chunks.push(chunk));
+            response.on('end', () => resolve({ buffer: Buffer.concat(chunks), contentType }));
+        });
+
+        request.setTimeout(15000, () => {
+            request.destroy(new Error('Image request timed out'));
+        });
+
+        request.on('error', reject);
+    } catch (err) {
+        reject(err);
+    }
+});
+
+const pickExtension = (contentType = '', fallback = 'jpg') => {
+    if (contentType.includes('png')) return 'png';
+    if (contentType.includes('jpeg')) return 'jpg';
+    if (contentType.includes('jpg')) return 'jpg';
+    if (contentType.includes('gif')) return 'gif';
+    return fallback;
+};
+
+const uploadCampaignImage = async (imageUrl) => {
+    if (!imageUrl) return null;
+
+    try {
+        try {
+            const directPhoto = await vk.upload.messagePhoto({ source: { url: imageUrl } });
+            if (directPhoto?.owner_id && directPhoto?.id) {
+                return `photo${directPhoto.owner_id}_${directPhoto.id}`;
+            }
+        } catch (directErr) {
+            console.warn('Direct VK upload failed, fallback to buffer', directErr?.message || directErr);
+        }
+
+        const { buffer, contentType } = await fetchImageBuffer(imageUrl);
+        if (!buffer || buffer.length === 0) throw new Error('Empty image buffer');
+
+        const filename = `campaign.${pickExtension(contentType)}`;
+        const photo = await vk.upload.messagePhoto({ source: { value: buffer, filename } });
+
+        if (photo?.owner_id && photo?.id) {
+            return `photo${photo.owner_id}_${photo.id}`;
+        }
+    } catch (err) {
+        console.error('Image upload failed', err);
+    }
+
+    return null;
+};
+
+app.post('/api/campaigns/send', async (req, res) => {
+    const { campaignId, message, type, segment = 'ALL', imageUrl, filters = {} } = req.body || {};
+
+    if (!message) return res.status(400).json({ error: 'Message is required' });
+
+    const audience = filterRecipients(await loadRecipients(), segment, filters);
+    if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
+
+    const photoAttachment = await uploadCampaignImage(imageUrl);
+    let sent = 0;
+    const errors = [];
+
+    for (const user of audience) {
+        try {
+            const intro = type === 'GAME_BATTLESHIP'
+                ? `${message}\n\n🏴‍☠️ Начни игру: напиши "Старт" или координату (например A1)`
+                : message;
+
+            const payload = {
+                user_id: user.vkId,
+                random_id: Date.now() + Math.floor(Math.random() * 100000),
+                message: intro,
+            };
+
+            if (photoAttachment) {
+                payload.attachment = photoAttachment;
+            }
+
+            await vk.api.messages.send(payload);
+
+            sent += 1;
+        } catch (err) {
+            errors.push({ user: user.vkId, message: err?.message || 'send_failed' });
+        }
+    }
+
+    res.json({
+        sent,
+        failed: errors.length,
+        errors,
+        recipients: audience.map((u) => ({
+            vkId: u.vkId,
+            segment: u.segment,
+            games_played: u.games_played,
+        })),
+    });
+});
 
 async function start() {
     await vk.updates.start();
