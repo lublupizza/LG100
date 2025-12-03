@@ -129,6 +129,20 @@ export const launchCampaign = async (
     if (mockUser && Math.random() > 0.7) {
         registerEvent(mockUser, EventType.PUSH_OPEN, { campaign_id: campaign.id });
     }
+  } catch (e) {
+    // Если API недоступен, fallback на моковую отправку
+    sentCount = filteredMockUsers.length;
+  }
+
+  const recipients = recipientsFromApi.length
+    ? recipientsFromApi
+    : filteredMockUsers.map((u) => ({ userId: u.id, vkId: u.vk_id, segment: u.segment }));
+
+  if (recipients.length === 0) return null;
+
+  if (sentCount === 0) {
+    sentCount = recipients.length;
+  }
 
     if (campaign.type === CampaignType.GAME_BATTLESHIP && mockUser) {
       SeaBattleSessionManager.startSession(mockUser.id, campaign.id);
