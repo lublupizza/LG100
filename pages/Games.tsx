@@ -96,12 +96,14 @@ const Games: React.FC = () => {
                           ${cell === CellState.MISS ? 'bg-gray-300 text-gray-500' : ''}
                           ${cell === CellState.HIT ? 'bg-red-500 text-white' : ''}
                           ${cell === CellState.SHIP ? 'bg-blue-100 hover:bg-red-100 border border-blue-200' : ''} 
+                          ${cell === CellState.KILLED ? 'bg-gray-800 text-white border-gray-900' : ''}
                         `}
                       >
                          {/* В админке мы видим корабли (SHIP), но показываем их прозрачно или специально,
                              чтобы админ мог подсказать или потестить. Для игрока SHIP выглядит как EMPTY */}
                          {cell === CellState.MISS && '•'}
                          {cell === CellState.HIT && 'X'}
+                         {cell === CellState.KILLED && '†'}
                          {cell === CellState.SHIP && <div className="w-2 h-2 bg-blue-300 rounded-full opacity-50" />}
                       </div>
                     ))

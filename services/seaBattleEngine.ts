@@ -1,3 +1,4 @@
+
 import { CellState, GameSession, GameType, GameChannel, GameStatus, EventType, User } from '../types';
 import { registerEvent } from './ltvEngine';
 import { mockGames, mockUsers } from './mockData';
@@ -152,24 +153,83 @@ export class SeaBattleSessionManager {
     return newSession;
   }
 
-  static adminForceMove(sessionId: string, x: number, y: number) {
-    const session = mockGames.find(g => g.id === sessionId);
-    const user = mockUsers.find(u => u.id === session?.user_id);
+  // --- NEW: ПАРСЕР КООРДИНАТ ---
+  // Превращает "А1", "Б10", "D5" в {x, y}
+  static parseCoordinates(text: string): {x: number, y: number} | null {
+    const cleanText = text.trim().toUpperCase();
     
-    if (!session || !session.board || session.status !== GameStatus.ACTIVE) return;
+    // Регулярка: Буква + Число
+    const match = cleanText.match(/^([А-ЯA-Z])([0-9]+)$/);
+    if (!match) return null;
 
+    const letter = match[1];
+    const number = parseInt(match[2], 10);
+
+    // Маппинг букв (Русские и Английские)
+    const lettersMap: Record<string, number> = {
+        'А': 0, 'Б': 1, 'В': 2, 'Г': 3, 'Д': 4, 'Е': 5, 'Ж': 6, 'З': 7, 'И': 8, 'К': 9,
+        'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8, 'J': 9
+    };
+
+    const x = lettersMap[letter];
+    const y = number - 1; // 1 -> 0, 10 -> 9
+
+    if (x === undefined || y < 0 || y > 9) return null;
+
+    return { x, y };
+  }
+
+  // --- NEW: Обработка сообщения пользователя ---
+  static handleUserMessage(userId: number, text: string): string | null {
+      // 1. Ищем активную игру
+      const session = mockGames.find(g => g.user_id === userId && g.status === GameStatus.ACTIVE && g.type === GameType.BATTLESHIP);
+      
+      if (!session) {
+          // Если пользователь пишет "Морской бой", можно начать новую игру (опционально)
+          if (text.toLowerCase().includes('морской бой')) {
+              this.startSession(userId);
+              return 'Игра началась! Поле 10x10. Ваш ход? (пример: А1)';
+          }
+          return null; // Игнорируем обычные сообщения если нет игры
+      }
+
+      // 2. Парсим координаты
+      const coords = this.parseCoordinates(text);
+      if (!coords) {
+          return 'Не понял координату. Пиши букву и число, например: А1, Б5, Е10';
+      }
+
+      // 3. Делаем выстрел
+      return this.makeMove(session, coords.x, coords.y);
+  }
+
+  // Общая логика хода (используется и админом, и ботом)
+  static makeMove(session: GameSession, x: number, y: number): string {
+    if (!session.board) return 'Ошибка поля';
+
+    const user = mockUsers.find(u => u.id === session.user_id);
     const { result, isWin } = SeaBattleGame.processShot(session.board, x, y);
 
     session.moves_count++;
     session.updated_at = new Date().toISOString();
-    session.state_summary = `Ход ${session.moves_count}: ${coordToText(x, y)} - ${result}`;
+    session.state_summary = `Ход ${session.moves_count} (${coordToText(x, y)}): ${result}`;
 
     if (user) registerEvent(user, EventType.GAME_PLAY);
 
     if (isWin) {
       session.status = GameStatus.FINISHED;
-      session.state_summary = 'ПОБЕДА! Игра завершена.';
+      session.state_summary = `ПОБЕДА! ${result}`; // Флот уничтожен
       if (user) registerEvent(user, EventType.GAME_WIN);
+    }
+
+    return result;
+  }
+
+  // Старый метод для совместимости с админкой (перенаправляем на makeMove)
+  static adminForceMove(sessionId: string, x: number, y: number) {
+    const session = mockGames.find(g => g.id === sessionId);
+    if (session) {
+        this.makeMove(session, x, y);
     }
   }
 }

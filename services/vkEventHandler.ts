@@ -2,6 +2,7 @@
 import { EventType } from '../types';
 import { registerEvent } from './ltvEngine';
 import { mockUsers } from './mockData';
+import { SeaBattleSessionManager } from './seaBattleEngine';
 
 // === BACKEND SIMULATION ===
 interface VkEvent {
@@ -22,6 +23,30 @@ export const handleVkEvent = (event: VkEvent) => {
   // 1.1. Разбор событий
   
   switch (type) {
+    case 'message_new': {
+        const msg = object.message; // Структура VK API для сообщения
+        const text = msg.text;
+        const fromId = msg.from_id;
+
+        console.log(`[VK Bot] Received message from ${fromId}: "${text}"`);
+        
+        // Пытаемся обработать как ход в игре
+        const gameResponse = SeaBattleSessionManager.handleUserMessage(fromId, text);
+        
+        if (gameResponse) {
+            console.log(`[VK Bot] Reply to ${fromId}: "${gameResponse}"`);
+            // В реальном коде здесь: vk.messages.send({ peer_id: fromId, message: gameResponse })
+        } else {
+            // Если это не ход игры, можно обработать другие команды (меню и т.д.)
+            console.log(`[VK Bot] Message ignored or processed as generic text.`);
+        }
+        
+        // Для LTV можно считать просто сообщение как PUSH_REPLY (ответ боту)
+        userId = fromId;
+        eventType = EventType.PUSH_REPLY; 
+        break;
+    }
+
     case 'like_add':
       userId = object.liker_id;
       if (object.object_type === 'post') {
