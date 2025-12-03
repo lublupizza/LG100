@@ -6,6 +6,32 @@ import { isDateInPeriod } from '../utils/dateHelpers';
 // Мок-база отправок (в реале - таблица SQL campaign_sends)
 export const mockCampaignSends: CampaignSend[] = [];
 
+const persistSends = () => {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        localStorage.setItem('campaign_sends', JSON.stringify(mockCampaignSends));
+    } catch (e) {
+        console.warn('Failed to persist campaign sends', e);
+    }
+};
+
+const hydrateSends = () => {
+    if (typeof localStorage === 'undefined') return;
+    const stored = localStorage.getItem('campaign_sends');
+    if (!stored) return;
+
+    try {
+        const parsed = JSON.parse(stored) as CampaignSend[];
+        if (Array.isArray(parsed)) {
+            mockCampaignSends.splice(0, mockCampaignSends.length, ...parsed);
+        }
+    } catch (e) {
+        console.warn('Failed to hydrate campaign sends', e);
+    }
+};
+
+hydrateSends();
+
 /**
  * 1. Создание записи об отправке
  */
@@ -30,6 +56,8 @@ export const recordCampaignSend = (
         vk_message_id: vkMessageId,
         sent_at: new Date().toISOString(),
     });
+
+    persistSends();
 };
 
 /**
@@ -84,6 +112,8 @@ export const trackCampaignReaction = (
         sendRecord.first_action_type = actionType;
         console.log(`[Campaign Tracker] User ${userId} ACTION in campaign ${sendRecord.campaign_id} via ${actionType}`);
     }
+
+    persistSends();
 };
 
 /**

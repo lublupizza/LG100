@@ -1,15 +1,15 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Campaign, UserSegment, CampaignType, TimePeriod } from '../types';
 import { mockCampaigns } from '../services/mockData';
-import { launchCampaign, recalculateGameStats } from '../services/campaignService';
+import { hydrateCampaigns, launchCampaign, recalculateGameStats } from '../services/campaignService';
 import { getCampaignFunnelForPeriod } from '../services/campaignTrackingService';
 import { Send, Plus, Calendar, Gamepad2, Play, Clock, Eye, Activity, Flame, ChevronRight } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
 
 const Campaigns: React.FC = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>(mockCampaigns);
-  const [period, setPeriod] = useState<TimePeriod>('7d'); 
+  const [period, setPeriod] = useState<TimePeriod>('7d');
   
   const [isCreating, setIsCreating] = useState(false);
   const [newCampaign, setNewCampaign] = useState({
@@ -18,6 +18,11 @@ const Campaigns: React.FC = () => {
     segment: 'ALL',
     message: '',
   });
+
+  useEffect(() => {
+    const hydrated = hydrateCampaigns();
+    setCampaigns([...hydrated]);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,8 +34,10 @@ const Campaigns: React.FC = () => {
         message: newCampaign.message,
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
-        created_at: new Date().toISOString().split('T')[0]
+        created_at: new Date().toISOString()
     };
+    mockCampaigns.unshift(camp);
+    localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
     setCampaigns([camp, ...campaigns]);
     setIsCreating(false);
     setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '' });
@@ -46,6 +53,7 @@ const Campaigns: React.FC = () => {
         });
         if (updatedCampaign) {
             setCampaigns(prev => prev.map(c => c.id === id ? updatedCampaign : c));
+            localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
         }
     }
   };

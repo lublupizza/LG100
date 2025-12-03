@@ -12,6 +12,33 @@ type CampaignFilter = {
   is_member?: boolean;
 };
 
+const persistCampaigns = () => {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
+  } catch (e) {
+    console.warn('Failed to persist campaigns', e);
+  }
+};
+
+export const hydrateCampaigns = (): Campaign[] => {
+  if (typeof localStorage === 'undefined') return mockCampaigns;
+
+  const stored = localStorage.getItem('campaigns');
+  if (!stored) return mockCampaigns;
+
+  try {
+    const parsed = JSON.parse(stored) as Campaign[];
+    if (Array.isArray(parsed)) {
+      mockCampaigns.splice(0, mockCampaigns.length, ...parsed);
+    }
+  } catch (e) {
+    console.warn('Failed to hydrate campaigns from storage', e);
+  }
+
+  return mockCampaigns;
+};
+
 export const launchCampaign = async (
   campaign: Campaign,
   filters: CampaignFilter = {}
@@ -126,6 +153,8 @@ export const launchCampaign = async (
   } else {
     mockCampaigns.unshift(updatedCampaign);
   }
+
+  persistCampaigns();
 
   return updatedCampaign;
 };
