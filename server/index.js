@@ -301,6 +301,25 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
     });
 };
 
+const uploadCampaignImage = async (imageUrl) => {
+    if (!imageUrl) return null;
+
+    try {
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        const photo = await vk.upload.messagePhoto({ source: { value: buffer } });
+        if (photo?.owner_id && photo?.id) {
+            return `photo${photo.owner_id}_${photo.id}`;
+        }
+    } catch (err) {
+        console.error('Image upload failed', err);
+    }
+
+    return null;
+};
+
 app.post('/api/campaigns/send', async (req, res) => {
     const { campaignId, message, type, segment = 'ALL', imageUrl, filters = {} } = req.body || {};
 
@@ -309,6 +328,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     const audience = filterRecipients(await loadRecipients(), segment, filters);
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
+    const photoAttachment = await uploadCampaignImage(imageUrl);
     let sent = 0;
     const errors = [];
 
@@ -318,12 +338,17 @@ app.post('/api/campaigns/send', async (req, res) => {
                 ? `${message}\n\n🏴‍☠️ Начни игру: напиши "Старт" или координату (например A1)`
                 : message;
 
-            await vk.api.messages.send({
+            const payload = {
                 user_id: user.vkId,
                 random_id: Date.now() + Math.floor(Math.random() * 100000),
                 message: intro,
-                attachment: imageUrl ? imageUrl : undefined,
-            });
+            };
+
+            if (photoAttachment) {
+                payload.attachment = photoAttachment;
+            }
+
+            await vk.api.messages.send(payload);
 
             sent += 1;
         } catch (err) {
