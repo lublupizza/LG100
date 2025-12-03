@@ -1,24 +1,21 @@
-# Logs
-logs
+# Секреты
+server/.env
+.env
+
+# Базы данных и логи
+server/dev.db
+server/dev.db-journal
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# Мусор и зависимости
+node_modules/
+server/node_modules/
+dist/
+server/public/
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+server/prisma/dev.db
+
+# Server secrets
+server/.env
+server/prisma/dev.db
+server/prisma/dev.db-journal
