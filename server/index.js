@@ -117,30 +117,47 @@ class SeaBattleGame {
     return board;
   }
   static getShipCells(board, x, y) {
+    const isShipPart = (cx, cy) => [CellState.SHIP, CellState.HIT, CellState.KILLED].includes(board[cy]?.[cx]);
+    const stack = [[x, y]];
+    const visited = new Set();
     const cells = [];
-    const traverse = (cx, cy) => {
-        const cell = board[cy]?.[cx];
-        if (cell === CellState.SHIP || cell === CellState.HIT || cell === CellState.KILLED) {
-            // Простая проверка без рекурсии для демо или полная
-            // Здесь упростим, чтобы код влез
-        }
-    };
-    // Используем упрощенную проверку победы для надежности вставки
-    return []; 
+
+    while (stack.length) {
+        const [cx, cy] = stack.pop();
+        const key = `${cx}:${cy}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+
+        if (!isShipPart(cx, cy)) continue;
+        cells.push({ x: cx, y: cy });
+
+        stack.push([cx + 1, cy]);
+        stack.push([cx - 1, cy]);
+        stack.push([cx, cy + 1]);
+        stack.push([cx, cy - 1]);
+    }
+
+    return cells;
   }
-  
+
   // Полная логика выстрела
   static processShot(board, x, y) {
     const cell = board[y][x];
     if (cell === CellState.MISS || cell === CellState.HIT || cell === CellState.KILLED) return { res: 'Сюда уже стреляли!', win: false };
     if (cell === CellState.EMPTY) { board[y][x] = CellState.MISS; return { res: 'Мимо!', win: false }; }
-    
+
     if (cell === CellState.SHIP) {
         board[y][x] = CellState.HIT;
-        
-        // Проверка на убийство (упрощенная: если нет соседних SHIP той же линии)
-        // В продакшене тут нужен полный getShipCells
-        
+
+        const shipCells = SeaBattleGame.getShipCells(board, x, y);
+        const shipKilled = shipCells.every(({ x: cx, y: cy }) =>
+            [CellState.HIT, CellState.KILLED].includes(board[cy][cx])
+        );
+
+        if (shipKilled) {
+            shipCells.forEach(({ x: cx, y: cy }) => board[cy][cx] = CellState.KILLED);
+        }
+
         const hasShips = board.some(row => row.includes(CellState.SHIP));
         if (!hasShips) {
              // Красим все HIT в KILLED при победе
@@ -149,6 +166,8 @@ class SeaBattleGame {
              }
              return { res: 'ПОБЕДА! 🎉', win: true };
         }
+
+        if (shipKilled) return { res: 'Корабль уничтожен! ☠️', win: false };
         return { res: 'Попал! 🔥', win: false };
     }
     return { res: 'Ошибка', win: false };
