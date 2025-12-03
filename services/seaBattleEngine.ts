@@ -1,4 +1,3 @@
-
 import { CellState, GameSession, GameType, GameChannel, GameStatus, EventType, User } from '../types';
 import { registerEvent } from './ltvEngine';
 import { mockGames, mockUsers } from './mockData';
@@ -11,12 +10,9 @@ export class SeaBattleGame {
     return Array(10).fill(null).map(() => Array(10).fill(CellState.EMPTY));
   }
 
-  // Генерация поля с кораблями (упрощенная рандомизация для демо)
+  // Генерация поля с кораблями
   static generateBoard(): CellState[][] {
     const board = this.createEmptyBoard();
-    
-    // Простая логика размещения: ставим несколько кораблей случайно
-    // В реальном проде нужен алгоритм с проверкой границ и наложений
     const ships = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]; // Размеры кораблей
     
     ships.forEach(size => {
@@ -27,10 +23,10 @@ export class SeaBattleGame {
         const x = Math.floor(Math.random() * 10);
         const y = Math.floor(Math.random() * 10);
         
-        // Упрощенная проверка границ
+        // Проверка границ
         if (isHorizontal && x + size <= 10) {
-           // Проверка наложения (очень простая)
            let clear = true;
+           // Проверка наложения + отступы (упрощенно проверяем только линию)
            for(let k=0; k<size; k++) if(board[y][x+k] !== CellState.EMPTY) clear = false;
            
            if(clear) {
@@ -53,6 +49,33 @@ export class SeaBattleGame {
     return board;
   }
 
+  // Helper: Найти все клетки конкретного корабля
+  static getShipCells(board: CellState[][], x: number, y: number): {x: number, y: number}[] {
+    const cells: {x: number, y: number}[] = [];
+    const visited = new Set<string>();
+    
+    const traverse = (cx: number, cy: number) => {
+        const key = `${cx},${cy}`;
+        if (visited.has(key)) return;
+        visited.add(key);
+
+        if (cx < 0 || cx >= 10 || cy < 0 || cy >= 10) return;
+        const cell = board[cy][cx];
+        
+        // Ищем и живые (SHIP), и подбитые (HIT), и убитые (KILLED) части
+        if (cell === CellState.SHIP || cell === CellState.HIT || cell === CellState.KILLED) {
+            cells.push({x: cx, y: cy});
+            traverse(cx + 1, cy);
+            traverse(cx - 1, cy);
+            traverse(cx, cy + 1);
+            traverse(cx, cy - 1);
+        }
+    };
+
+    traverse(x, y);
+    return cells;
+  }
+
   // Обработка выстрела
   static processShot(board: CellState[][], x: number, y: number): { result: string, newState: CellState, isWin: boolean } {
     const cell = board[y][x];
@@ -67,13 +90,43 @@ export class SeaBattleGame {
     }
 
     if (cell === CellState.SHIP) {
+      // 1. Помечаем попадание
       board[y][x] = CellState.HIT;
-      // Проверка на победу (есть ли еще корабли)
+      
+      // 2. Проверяем, убит ли корабль полностью
+      const shipCells = this.getShipCells(board, x, y);
+      const isKilled = shipCells.every(c => board[c.y][c.x] === CellState.HIT || board[c.y][c.x] === CellState.KILLED);
+      
+      let resultText = 'Попал!';
+      let newState = CellState.HIT;
+
+      if (isKilled) {
+        resultText = 'УБИЛ! Корабль пошел ко дну.';
+        newState = CellState.KILLED;
+        
+        // 3. Красим корабль в KILLED и ставим MISS вокруг
+        shipCells.forEach(c => {
+            board[c.y][c.x] = CellState.KILLED;
+            
+            // Обстрел зоны вокруг (ореол)
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const nx = c.x + dx;
+                    const ny = c.y + dy;
+                    if (nx >= 0 && nx < 10 && ny >= 0 && ny < 10) {
+                        if (board[ny][nx] === CellState.EMPTY) {
+                            board[ny][nx] = CellState.MISS;
+                        }
+                    }
+                }
+            }
+        });
+      }
+
+      // 4. Проверка на победу
       const hasShips = board.some(row => row.includes(CellState.SHIP));
       
-      // В реальной игре нужно проверять "Убил" (весь корабль потоплен)
-      // Здесь для упрощения считаем HIT
-      return { result: hasShips ? 'Попал!' : 'ПОБЕДА! Флот уничтожен.', newState: CellState.HIT, isWin: !hasShips };
+      return { result: hasShips ? resultText : 'ПОБЕДА! Флот уничтожен.', newState: newState, isWin: !hasShips };
     }
 
     return { result: 'Ошибка', newState: CellState.EMPTY, isWin: false };
@@ -84,7 +137,6 @@ export class SeaBattleGame {
 
 export class SeaBattleSessionManager {
   
-  // Создание новой сессии (например, при старте кампании)
   static startSession(userId: number, campaignId?: string): GameSession {
     const user = mockUsers.find(u => u.id === userId);
     
@@ -103,10 +155,8 @@ export class SeaBattleSessionManager {
       board: SeaBattleGame.generateBoard()
     };
 
-    // Сохраняем в мок-базу
     mockGames.unshift(newSession);
 
-    // LTV Event: Game Start
     if (user) {
       registerEvent(user, EventType.GAME_START);
     }
@@ -114,18 +164,6 @@ export class SeaBattleSessionManager {
     return newSession;
   }
 
-  // Обработка хода (симуляция входящего сообщения A1..J10)
-  static handleMove(sessionId: string, coord: string) {
-    const session = mockGames.find(g => g.id === sessionId);
-    if (!session || !session.board || session.status !== GameStatus.ACTIVE) return;
-
-    // Парсинг координаты (A1 -> x=0, y=0)
-    // Упрощенно: x, y приходят числами от UI для теста
-    // В реальном боте здесь парсер текста
-  }
-
-  // Метод для вызова из UI админки (клик по клетке)
-  // Эмулирует ход пользователя
   static adminForceMove(sessionId: string, x: number, y: number) {
     const session = mockGames.find(g => g.id === sessionId);
     const user = mockUsers.find(u => u.id === session?.user_id);
@@ -134,12 +172,10 @@ export class SeaBattleSessionManager {
 
     const { result, isWin } = SeaBattleGame.processShot(session.board, x, y);
 
-    // Обновляем состояние сессии
     session.moves_count++;
     session.updated_at = new Date().toISOString();
     session.state_summary = `Ход ${session.moves_count}: ${coordToText(x, y)} - ${result}`;
 
-    // LTV Event: Game Play
     if (user) {
       registerEvent(user, EventType.GAME_PLAY);
     }
@@ -147,7 +183,6 @@ export class SeaBattleSessionManager {
     if (isWin) {
       session.status = GameStatus.FINISHED;
       session.state_summary = 'ПОБЕДА! Игра завершена.';
-      // LTV Event: Win
       if (user) {
         registerEvent(user, EventType.GAME_WIN);
       }
@@ -155,7 +190,6 @@ export class SeaBattleSessionManager {
   }
 }
 
-// Хелпер для координат
 function coordToText(x: number, y: number): string {
   const letters = 'ABCDEFGHIJ';
   return `${letters[x]}${y + 1}`;
