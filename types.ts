@@ -159,6 +159,19 @@ export interface CampaignFunnelStats extends CampaignReactionStats {
     warm_hot_from_acted: number;
 }
 
+export interface CampaignSend {
+  id: string;
+  campaign_id: string;
+  user_id?: number;
+  user_vk_id?: number;
+  segment?: UserSegment | 'ALL';
+  vk_message_id?: number;
+  sent_at: string;
+  viewed_at?: string;
+  first_action_at?: string;
+  first_action_type?: EventType | string;
+}
+
 export interface EventMetadata {
   campaign_id?: string;
   post_id?: number;
