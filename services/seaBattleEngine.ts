@@ -23,12 +23,10 @@ export class SeaBattleGame {
         const x = Math.floor(Math.random() * 10);
         const y = Math.floor(Math.random() * 10);
         
-        // Проверка границ
+        // Проверка границ и наложений
         if (isHorizontal && x + size <= 10) {
            let clear = true;
-           // Проверка наложения + отступы (упрощенно проверяем только линию)
            for(let k=0; k<size; k++) if(board[y][x+k] !== CellState.EMPTY) clear = false;
-           
            if(clear) {
              for(let k=0; k<size; k++) board[y][x+k] = CellState.SHIP;
              placed = true;
@@ -36,7 +34,6 @@ export class SeaBattleGame {
         } else if (!isHorizontal && y + size <= 10) {
            let clear = true;
            for(let k=0; k<size; k++) if(board[y+k][x] !== CellState.EMPTY) clear = false;
-           
            if(clear) {
              for(let k=0; k<size; k++) board[y+k][x] = CellState.SHIP;
              placed = true;
@@ -45,7 +42,6 @@ export class SeaBattleGame {
         attempts++;
       }
     });
-
     return board;
   }
 
@@ -62,7 +58,7 @@ export class SeaBattleGame {
         if (cx < 0 || cx >= 10 || cy < 0 || cy >= 10) return;
         const cell = board[cy][cx];
         
-        // Ищем и живые (SHIP), и подбитые (HIT), и убитые (KILLED) части
+        // Ищем и живые, и подбитые части корабля
         if (cell === CellState.SHIP || cell === CellState.HIT || cell === CellState.KILLED) {
             cells.push({x: cx, y: cy});
             traverse(cx + 1, cy);
@@ -104,11 +100,10 @@ export class SeaBattleGame {
         resultText = 'УБИЛ! Корабль пошел ко дну.';
         newState = CellState.KILLED;
         
-        // 3. Красим корабль в KILLED и ставим MISS вокруг
+        // 3. Красим корабль в KILLED и ставим MISS вокруг (ореол)
         shipCells.forEach(c => {
             board[c.y][c.x] = CellState.KILLED;
             
-            // Обстрел зоны вокруг (ореол)
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     const nx = c.x + dx;
@@ -136,10 +131,8 @@ export class SeaBattleGame {
 // === 2. МЕНЕДЖЕР СЕССИЙ (Session Manager) ===
 
 export class SeaBattleSessionManager {
-  
   static startSession(userId: number, campaignId?: string): GameSession {
     const user = mockUsers.find(u => u.id === userId);
-    
     const newSession: GameSession = {
       id: `game_${Date.now()}_${userId}`,
       user_id: userId,
@@ -154,13 +147,8 @@ export class SeaBattleSessionManager {
       campaign_id: campaignId,
       board: SeaBattleGame.generateBoard()
     };
-
     mockGames.unshift(newSession);
-
-    if (user) {
-      registerEvent(user, EventType.GAME_START);
-    }
-
+    if (user) registerEvent(user, EventType.GAME_START);
     return newSession;
   }
 
@@ -176,16 +164,12 @@ export class SeaBattleSessionManager {
     session.updated_at = new Date().toISOString();
     session.state_summary = `Ход ${session.moves_count}: ${coordToText(x, y)} - ${result}`;
 
-    if (user) {
-      registerEvent(user, EventType.GAME_PLAY);
-    }
+    if (user) registerEvent(user, EventType.GAME_PLAY);
 
     if (isWin) {
       session.status = GameStatus.FINISHED;
       session.state_summary = 'ПОБЕДА! Игра завершена.';
-      if (user) {
-        registerEvent(user, EventType.GAME_WIN);
-      }
+      if (user) registerEvent(user, EventType.GAME_WIN);
     }
   }
 }

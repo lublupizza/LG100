@@ -1,10 +1,10 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
-  AreaChart, Area, PieChart, Pie, Cell 
+  AreaChart, Area, Cell, PieChart, Pie 
 } from 'recharts';
-import { TrendingUp, Users, Activity, Zap, Trophy, MousePointerClick, Calendar, Clock, Heart, MessageSquare, UserPlus } from 'lucide-react';
+import { Users, Activity, Zap, Trophy, Clock, Heart, MessageSquare, UserPlus, Loader2 } from 'lucide-react';
 import { User, UserSegment, TimePeriod } from '../types';
 import { mockCampaigns } from '../services/mockData';
 import { isDateInPeriod, getPeriodLabel, getDaysForPeriod } from '../utils/dateHelpers';
@@ -13,77 +13,140 @@ interface DashboardProps {
   users: User[];
 }
 
-// Генерация демо-данных для графика "Активность по времени" в зависимости от периода
-const generateActivityData = (period: TimePeriod) => {
-  const data = [];
-  const days = getDaysForPeriod(period);
-  
-  for (let i = 0; i < days; i++) {
-    const date = new Date();
-    date.setDate(date.getDate() - (days - 1 - i));
-    
-    // Формат даты
-    let label = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-    if (period === '1d') {
-        label = `${date.getHours()}:00`; 
+// 1. Определяем контракт данных, которые мы ждем от Бэкенда
+interface DashboardData {
+  kpi: {
+    totalSubscribers: number;
+    newSubscribers: number;
+    activeUsers: number;
+    avgLTV: number;
+    hotUsers: number;
+  };
+  charts: {
+    activity: any[];
+    ltvStructure: any[];
+  };
+  lists: {
+    topUsers: User[];
+    socialStats: {
+        likes: number;
+        comments: number;
+        newMembers: number;
     }
-
-    data.push({
-      date: label,
-      activeUsers: Math.floor(Math.random() * 50) + 20, // 20-70 users
-      newUsers: Math.floor(Math.random() * 10) + 1,      // 1-11 new
-      likes: Math.floor(Math.random() * 30) + 5         // 5-35 likes
-    });
-  }
-  return data;
-};
+  };
+}
 
 const Dashboard: React.FC<DashboardProps> = ({ users }) => {
   const [period, setPeriod] = useState<TimePeriod>('7d');
-
-  // --- Фильтрация данных по периоду ---
   
-  // 1. Активные пользователи (Last Active внутри периода)
-  const activeUsersCount = useMemo(() => {
-    return users.filter(u => isDateInPeriod(u.last_active, period)).length;
-  }, [users, period]);
+  // 2. Состояние для данных и загрузки
+  const [stats, setStats] = useState<DashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // 2. Статистика LTV
-  const totalLTV = users.reduce((acc, user) => acc + user.ltv_stats.total, 0);
-  const totalUsers = users.length;
-  const avgLTV = totalUsers > 0 ? Math.round(totalLTV / totalUsers) : 0;
-  
-  const hotUsers = users.filter(u => u.segment === UserSegment.HOT).length;
-  
-  // 3. Социальная статистика
-  const totalSubscribers = users.filter(u => u.social_stats.is_member).length;
-  const totalLikes = users.reduce((acc, u) => acc + u.social_stats.likes, 0);
-  // Эмуляция "новых" действий за период (т.к. нет timestamp в user.social_stats)
-  // В реале: SELECT COUNT(*) FROM events WHERE type='like' AND date > period
-  const estimatedNewLikes = Math.floor(totalLikes * (getDaysForPeriod(period) / 365) * 5); // Демо-формула
-  
-  // Топ 5 пользователей
-  const topUsers = [...users].sort((a, b) => b.ltv_stats.total - a.ltv_stats.total).slice(0, 5);
+  // 3. Эмуляция запроса к API (Backend Logic)
+  // В будущем замените это на: const response = await fetch(`/api/dashboard?period=${period}`);
+  const fakeApiFetch = (selectedPeriod: TimePeriod): Promise<DashboardData> => {
+    return new Promise((resolve) => {
+      // Имитация задержки сети
+      setTimeout(() => {
+        // --- ЛОГИКА БЭКЕНДА НАЧАЛО ---
+        
+        // 1. KPI
+        const activeUsersCount = users.filter(u => isDateInPeriod(u.last_active, selectedPeriod)).length;
+        const totalLTV = users.reduce((acc, user) => acc + user.ltv_stats.total, 0);
+        const totalUsers = users.length;
+        const avgLTV = totalUsers > 0 ? Math.round(totalLTV / totalUsers) : 0;
+        const hotUsers = users.filter(u => u.segment === UserSegment.HOT).length;
+        const totalSubscribers = users.filter(u => u.social_stats.is_member).length;
+        
+        // 2. Графики (Activity)
+        const activityData = [];
+        const days = getDaysForPeriod(selectedPeriod);
+        for (let i = 0; i < days; i++) {
+            const date = new Date();
+            date.setDate(date.getDate() - (days - 1 - i));
+            let label = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+            if (selectedPeriod === '1d') label = `${date.getHours()}:00`; 
+            
+            activityData.push({
+            date: label,
+            activeUsers: Math.floor(Math.random() * 50) + 20,
+            likes: Math.floor(Math.random() * 30) + 5
+            });
+        }
 
-  // Последние кампании
-  const recentCampaigns = useMemo(() => {
-    return mockCampaigns
-        .filter(c => isDateInPeriod(c.created_at, period))
-        .slice(0, 3);
-  }, [period]);
+        // 3. Графики (LTV Structure)
+        const ltvCategoriesData = [
+            { name: 'Игры', value: users.reduce((acc, u) => acc + u.ltv_stats.game, 0), color: '#8B5CF6' },
+            { name: 'Реакции', value: users.reduce((acc, u) => acc + u.ltv_stats.reaction, 0), color: '#3B82F6' },
+            { name: 'Триггеры', value: users.reduce((acc, u) => acc + u.ltv_stats.trigger, 0), color: '#10B981' },
+            { name: 'Соц.Актив', value: users.reduce((acc, u) => acc + u.ltv_stats.social, 0), color: '#EC4899' },
+        ];
 
-  // Данные для графиков
-  const activityData = useMemo(() => generateActivityData(period), [period]);
-  
-  const ltvCategoriesData = [
-    { name: 'Игры', value: users.reduce((acc, u) => acc + u.ltv_stats.game, 0), color: '#8B5CF6' },
-    { name: 'Реакции', value: users.reduce((acc, u) => acc + u.ltv_stats.reaction, 0), color: '#3B82F6' },
-    { name: 'Триггеры', value: users.reduce((acc, u) => acc + u.ltv_stats.trigger, 0), color: '#10B981' },
-    { name: 'Соц.Актив', value: users.reduce((acc, u) => acc + u.ltv_stats.social, 0), color: '#EC4899' },
-  ];
+        // 4. Списки
+        const topUsers = [...users].sort((a, b) => b.ltv_stats.total - a.ltv_stats.total).slice(0, 5);
+        
+        // Соц статистика (эмуляция за период)
+        const totalLikes = users.reduce((acc, u) => acc + u.social_stats.likes, 0);
+        const factor = (getDaysForPeriod(selectedPeriod) / 365) * 5; // Простая формула для демо
+        const estimatedLikes = Math.floor(totalLikes * factor);
 
+        const response: DashboardData = {
+            kpi: {
+                totalSubscribers,
+                newSubscribers: Math.floor(totalSubscribers * 0.05),
+                activeUsers: activeUsersCount,
+                avgLTV,
+                hotUsers
+            },
+            charts: {
+                activity: activityData,
+                ltvStructure: ltvCategoriesData
+            },
+            lists: {
+                topUsers,
+                socialStats: {
+                    likes: estimatedLikes,
+                    comments: Math.floor(estimatedLikes / 4),
+                    newMembers: Math.floor(estimatedLikes / 10)
+                }
+            }
+        };
+        // --- ЛОГИКА БЭКЕНДА КОНЕЦ ---
+
+        resolve(response);
+      }, 600); // Задержка 600мс
+    });
+  };
+
+  // 4. Эффект для загрузки данных при смене периода
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoading(true);
+
+    fakeApiFetch(period).then(data => {
+        if (isMounted) {
+            setStats(data);
+            setIsLoading(false);
+        }
+    });
+
+    return () => { isMounted = false; };
+  }, [period, users]);
+
+  // UI Загрузки
+  if (isLoading || !stats) {
+      return (
+          <div className="flex flex-col items-center justify-center h-[60vh] text-gray-400">
+              <Loader2 size={40} className="animate-spin text-pizza-red mb-4" />
+              <p>Загрузка аналитики...</p>
+          </div>
+      );
+  }
+
+  // UI Дашборда (Отрисовка)
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       
       {/* Header with Period Selector */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -116,14 +179,14 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Подписчики группы</p>
-              <h3 className="text-3xl font-bold mt-2 text-gray-900">{totalSubscribers}</h3>
+              <h3 className="text-3xl font-bold mt-2 text-gray-900">{stats.kpi.totalSubscribers}</h3>
             </div>
             <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
               <Users size={24} />
             </div>
           </div>
           <div className="mt-4 flex items-center text-xs font-medium text-green-600 bg-green-50 w-fit px-2 py-1 rounded">
-            <UserPlus size={14} className="mr-1" /> {Math.floor(totalSubscribers * 0.05)} новых
+            <UserPlus size={14} className="mr-1" /> {stats.kpi.newSubscribers} новых
           </div>
         </div>
 
@@ -132,7 +195,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Активные ({getPeriodLabel(period)})</p>
-              <h3 className="text-3xl font-bold mt-2 text-gray-900">{activeUsersCount}</h3>
+              <h3 className="text-3xl font-bold mt-2 text-gray-900">{stats.kpi.activeUsers}</h3>
             </div>
             <div className="p-2 bg-purple-50 rounded-lg text-purple-600">
               <Activity size={24} />
@@ -148,7 +211,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Средний LTV</p>
-              <h3 className="text-3xl font-bold mt-2 text-gray-900">{avgLTV} <span className="text-base font-normal text-gray-400">баллов</span></h3>
+              <h3 className="text-3xl font-bold mt-2 text-gray-900">{stats.kpi.avgLTV} <span className="text-base font-normal text-gray-400">баллов</span></h3>
             </div>
             <div className="p-2 bg-yellow-50 rounded-lg text-yellow-600">
               <Zap size={24} />
@@ -164,7 +227,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Горячий сегмент</p>
-              <h3 className="text-3xl font-bold mt-2 text-pizza-red">{hotUsers}</h3>
+              <h3 className="text-3xl font-bold mt-2 text-pizza-red">{stats.kpi.hotUsers}</h3>
             </div>
             <div className="p-2 bg-red-50 rounded-lg text-pizza-red">
               <Trophy size={24} />
@@ -189,7 +252,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
           </div>
           <div className="flex-1 min-h-0">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={activityData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={stats.charts.activity} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#DC2626" stopOpacity={0.1}/>
@@ -219,13 +282,13 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
           <p className="text-xs text-gray-500 mb-4">Суммарный LTV по всем пользователям</p>
           <div className="flex-1 min-h-0">
              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={ltvCategoriesData} layout="vertical" margin={{ left: -20 }}>
+                <BarChart data={stats.charts.ltvStructure} layout="vertical" margin={{ left: -20 }}>
                    <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
                    <XAxis type="number" hide />
                    <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 11}} axisLine={false} tickLine={false} />
                    <RechartsTooltip cursor={{fill: 'transparent'}} />
                    <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={24}>
-                      {ltvCategoriesData.map((entry, index) => (
+                      {stats.charts.ltvStructure.map((entry: any, index: number) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                    </Bar>
@@ -254,7 +317,7 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
                  </tr>
                </thead>
                <tbody className="divide-y divide-gray-100">
-                 {topUsers.map((user, idx) => (
+                 {stats.lists.topUsers.map((user, idx) => (
                    <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                      <td className="px-3 py-3 font-medium text-gray-900 flex items-center gap-2">
                         <span className="text-gray-400 w-4">{idx + 1}.</span>
@@ -279,26 +342,26 @@ const Dashboard: React.FC<DashboardProps> = ({ users }) => {
            </div>
         </div>
 
-        {/* Блок: Социальная активность (Новый) */}
+        {/* Блок: Социальная активность */}
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
             <h4 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                <Heart size={20} className="text-pink-500" />
-               Социальная активность (за период)
+               Социальная активность ({getPeriodLabel(period)})
            </h4>
            <div className="grid grid-cols-3 gap-4">
               <div className="p-4 bg-pink-50 rounded-xl text-center">
                   <Heart className="mx-auto text-pink-500 mb-2" size={24} />
-                  <div className="text-2xl font-bold text-gray-900">{estimatedNewLikes}</div>
+                  <div className="text-2xl font-bold text-gray-900">{stats.lists.socialStats.likes}</div>
                   <div className="text-xs text-gray-500 font-medium">Лайков</div>
               </div>
               <div className="p-4 bg-blue-50 rounded-xl text-center">
                   <MessageSquare className="mx-auto text-blue-500 mb-2" size={24} />
-                  <div className="text-2xl font-bold text-gray-900">{Math.floor(estimatedNewLikes / 4)}</div>
+                  <div className="text-2xl font-bold text-gray-900">{stats.lists.socialStats.comments}</div>
                   <div className="text-xs text-gray-500 font-medium">Комментов</div>
               </div>
               <div className="p-4 bg-green-50 rounded-xl text-center">
                   <UserPlus className="mx-auto text-green-500 mb-2" size={24} />
-                  <div className="text-2xl font-bold text-gray-900">{Math.floor(estimatedNewLikes / 10)}</div>
+                  <div className="text-2xl font-bold text-gray-900">{stats.lists.socialStats.newMembers}</div>
                   <div className="text-xs text-gray-500 font-medium">Новых подписчиков</div>
               </div>
            </div>
