@@ -20,7 +20,7 @@ export const launchCampaign = async (
   if (!campaign) return null;
 
   // 1. Отбор аудитории
-  const targetUsers = mockUsers.filter(u => {
+  const filteredMockUsers = mockUsers.filter(u => {
     if (filters.segment_target && filters.segment_target !== 'ALL') {
       if (u.segment !== filters.segment_target) return false;
     } else if (campaign.segment_target !== 'ALL' && u.segment !== campaign.segment_target) {
@@ -33,10 +33,9 @@ export const launchCampaign = async (
     return true;
   });
 
-  if (targetUsers.length === 0) return null;
-
   // 2. Рассылка / Активация
   let sentCount = 0;
+  let recipientsFromApi: { userId?: number; vkId?: number; segment?: UserSegment | 'ALL' }[] = [];
 
   // 2a. Отправка реальным пользователям через бэкенд
   try {
@@ -54,30 +53,46 @@ export const launchCampaign = async (
 
     if (response.ok) {
       const data = await response.json();
-      sentCount = data.sent ?? targetUsers.length;
+      sentCount = data.sent ?? filteredMockUsers.length;
+      recipientsFromApi = (data.recipients || []).map((r: any) => ({
+        userId: r.id ?? r.user_id,
+        vkId: r.vkId ?? r.vk_id ?? r.user_vk_id,
+        segment: r.segment ?? (campaign.segment_target ?? 'ALL'),
+      }));
     } else {
-      sentCount = targetUsers.length;
+      sentCount = filteredMockUsers.length;
     }
   } catch (e) {
     // Если API недоступен, fallback на моковую отправку
-    sentCount = targetUsers.length;
+    sentCount = filteredMockUsers.length;
+  }
+
+  const recipients = recipientsFromApi.length
+    ? recipientsFromApi
+    : filteredMockUsers.map((u) => ({ userId: u.id, vkId: u.vk_id, segment: u.segment }));
+
+  if (recipients.length === 0) return null;
+
+  if (sentCount === 0) {
+    sentCount = recipients.length;
   }
 
   // 2b. Трекинг и игровые сессии для аналитики
-  targetUsers.forEach(user => {
-    // === NEW: Фиксируем отправку в системе трекинга ===
-    recordCampaignSend(campaign.id, user.id);
+  recipients.forEach(recipient => {
+    recordCampaignSend(campaign.id, {
+      userId: recipient.userId,
+      vkId: recipient.vkId,
+      segment: recipient.segment,
+    });
 
-    // LTV: Если пользователь открыл пуш (эмуляция: считаем, что 30% открыли сразу)
-    // В реальной системе это событие пришло бы от Callback API "messages_read" или "payload"
-    if (Math.random() > 0.7) {
-        // Передаем campaign_id чтобы трекер засчитал просмотр
-        registerEvent(user, EventType.PUSH_OPEN, { campaign_id: campaign.id });
+    // Для моковых пользователей сохраняем старую симуляцию открытий
+    const mockUser = filteredMockUsers.find((u) => u.id === recipient.userId);
+    if (mockUser && Math.random() > 0.7) {
+        registerEvent(mockUser, EventType.PUSH_OPEN, { campaign_id: campaign.id });
     }
 
-    // СПЕЦИФИКА ДЛЯ МОРСКОГО БОЯ
-    if (campaign.type === CampaignType.GAME_BATTLESHIP) {
-      SeaBattleSessionManager.startSession(user.id, campaign.id);
+    if (campaign.type === CampaignType.GAME_BATTLESHIP && mockUser) {
+      SeaBattleSessionManager.startSession(mockUser.id, campaign.id);
     }
   });
 

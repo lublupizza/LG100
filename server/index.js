@@ -330,7 +330,16 @@ app.post('/api/campaigns/send', async (req, res) => {
         }
     }
 
-    res.json({ sent, failed: errors.length, errors });
+    res.json({
+        sent,
+        failed: errors.length,
+        errors,
+        recipients: audience.map((u) => ({
+            vkId: u.vkId,
+            segment: u.segment,
+            games_played: u.games_played,
+        })),
+    });
 });
 
 async function start() {
