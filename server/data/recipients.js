@@ -1,0 +1,42 @@
+module.exports = [
+  {
+    vkId: 1001,
+    segment: 'HOT',
+    games_played: 12,
+    is_member: true,
+    first_name: 'Иван',
+    last_name: 'Иванов',
+  },
+  {
+    vkId: 1002,
+    segment: 'WARM',
+    games_played: 3,
+    is_member: true,
+    first_name: 'Мария',
+    last_name: 'Петрова',
+  },
+  {
+    vkId: 1003,
+    segment: 'COLD',
+    games_played: 1,
+    is_member: false,
+    first_name: 'Сергей',
+    last_name: 'Смирнов',
+  },
+  {
+    vkId: 1004,
+    segment: 'WARM',
+    games_played: 5,
+    is_member: true,
+    first_name: 'Анна',
+    last_name: 'Сидорова',
+  },
+  {
+    vkId: 1005,
+    segment: 'HOT',
+    games_played: 45,
+    is_member: true,
+    first_name: 'Дмитрий',
+    last_name: 'Козлов',
+  },
+];
