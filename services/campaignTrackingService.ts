@@ -9,17 +9,26 @@ export const mockCampaignSends: CampaignSend[] = [];
 /**
  * 1. Создание записи об отправке
  */
-export const recordCampaignSend = (campaignId: string, userId: number, vkMessageId?: number) => {
+export const recordCampaignSend = (
+    campaignId: string,
+    opts: { userId?: number; vkId?: number; segment?: UserSegment | 'ALL'; vkMessageId?: number } = {}
+) => {
+    const { userId, vkId, segment, vkMessageId } = opts;
+
     // Проверяем, не отправляли ли уже (для идемпотентности моков)
-    const exists = mockCampaignSends.some(s => s.campaign_id === campaignId && s.user_id === userId);
+    const exists = mockCampaignSends.some(
+        (s) => s.campaign_id === campaignId && (s.user_id === userId || (vkId && s.user_vk_id === vkId))
+    );
     if (exists) return;
 
     mockCampaignSends.push({
-        id: `send_${Date.now()}_${userId}_${Math.random()}`,
+        id: `send_${Date.now()}_${userId ?? vkId}_${Math.random()}`,
         campaign_id: campaignId,
         user_id: userId,
+        user_vk_id: vkId,
+        segment,
         vk_message_id: vkMessageId,
-        sent_at: new Date().toISOString()
+        sent_at: new Date().toISOString(),
     });
 };
 
@@ -27,12 +36,19 @@ export const recordCampaignSend = (campaignId: string, userId: number, vkMessage
  * 2. Регистрация реакции пользователя (View / Action)
  * Вызывается из registerEvent или VK Handler
  */
-export const trackCampaignReaction = (userId: number, actionType: EventType | string, campaignId?: string, postId?: number) => {
+export const trackCampaignReaction = (
+    userId: number,
+    actionType: EventType | string,
+    campaignId?: string,
+    postId?: number
+) => {
     let sendRecord: CampaignSend | undefined;
 
     // Сценарий А: Явно передан campaign_id (через payload кнопки/игры)
     if (campaignId) {
-        sendRecord = mockCampaignSends.find(s => s.campaign_id === campaignId && s.user_id === userId);
+        sendRecord = mockCampaignSends.find(
+            (s) => s.campaign_id === campaignId && (s.user_id === userId || s.user_vk_id === userId)
+        );
     }
     // Сценарий Б: Реакция на пост (ищем активную кампанию по этому посту)
     else if (postId) {
@@ -41,7 +57,9 @@ export const trackCampaignReaction = (userId: number, actionType: EventType | st
         if (campaign) {
              // Ищем отправку этому юзеру по этой кампании
              // Важно: проверяем, что отправка была недавно (например, в последние 14 дней)
-             sendRecord = mockCampaignSends.find(s => s.campaign_id === campaign.id && s.user_id === userId);
+             sendRecord = mockCampaignSends.find(
+                (s) => s.campaign_id === campaign.id && (s.user_id === userId || s.user_vk_id === userId)
+             );
              
              // Доп. проверка: если отправка была слишком давно ( > 14 дней), не считаем это реакцией на кампанию
              if (sendRecord && new Date(sendRecord.sent_at).getTime() < Date.now() - 14 * 24 * 60 * 60 * 1000) {
@@ -91,7 +109,11 @@ export const getCampaignReactionStats = (campaignId: string, period: TimePeriod 
  */
 export const getCampaignFunnel = (campaignId: string, period: TimePeriod = 'ALL'): CampaignFunnelStats => {
     // 1. Выбираем отправки конкретной кампании
-    const sends = mockCampaignSends.filter(s => s.campaign_id === campaignId);
+    const sends = mockCampaignSends.filter((s) => {
+        if (s.campaign_id !== campaignId) return false;
+        if (period === 'ALL') return true;
+        return isDateInPeriod(s.sent_at, period);
+    });
     const total = sends.length;
 
     if (total === 0) {
@@ -117,7 +139,8 @@ export const getCampaignFunnel = (campaignId: string, period: TimePeriod = 'ALL'
     // Здесь считаем среди тех, кто СОВЕРШИЛ ДЕЙСТВИЕ, сколько из них сейчас Warm/Hot
     actedSends.forEach(s => {
         const user = mockUsers.find(u => u.id === s.user_id);
-        if (user && (user.segment === UserSegment.WARM || user.segment === UserSegment.HOT)) {
+        const segment = s.segment ?? user?.segment;
+        if (segment === UserSegment.WARM || segment === UserSegment.HOT) {
             warmHotCount++;
         }
     });
