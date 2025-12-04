@@ -688,7 +688,13 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
             filename = `${filename}.${pickAudioExtension(contentType, 'ogg')}`;
         }
 
-        let attachment = await uploadAudioMessageViaDocs({ buffer, filename, contentType });
+        let attachment = null;
+
+        try {
+            attachment = await uploadAudioMessageViaDocs({ buffer, filename, contentType });
+        } catch (docsErr) {
+            console.warn('docs audio_message upload errored, fallback to vk.upload.audioMessage', docsErr);
+        }
 
         if (!attachment) {
             try {
