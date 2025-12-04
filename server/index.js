@@ -565,7 +565,7 @@ const uploadCampaignImage = async (imageUrl) => {
         try {
             const directPhoto = await vk.upload.messagePhoto({ source: { url: cleanUrl } });
             if (directPhoto?.owner_id && directPhoto?.id) {
-                const attachment = `photo${directPhoto.owner_id}_${directPhoto.id}`;
+                const attachment = `photo${directPhoto.owner_id}_${directPhoto.id}${directPhoto.access_key ? '_' + directPhoto.access_key : ''}`;
                 uploadedCampaignPhotos.set(cleanUrl, attachment);
                 return attachment;
             }
@@ -580,7 +580,7 @@ const uploadCampaignImage = async (imageUrl) => {
         const photo = await vk.upload.messagePhoto({ source: { value: buffer, filename } });
 
         if (photo?.owner_id && photo?.id) {
-            const attachment = `photo${photo.owner_id}_${photo.id}`;
+            const attachment = `photo${photo.owner_id}_${photo.id}${photo.access_key ? '_' + photo.access_key : ''}`;
             uploadedCampaignPhotos.set(cleanUrl, attachment);
             return attachment;
         }
@@ -610,7 +610,7 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
             try {
                 const direct = await vk.upload.audioMessage({ source: { url: cleanUrl } });
                 if (direct?.owner_id && direct?.id) {
-                    const attachment = `doc${direct.owner_id}_${direct.id}${direct.access_key ? '_' + direct.access_key : ''}`;
+                    const attachment = `audio_message${direct.owner_id}_${direct.id}${direct.access_key ? '_' + direct.access_key : ''}`;
                     uploadedCampaignVoices.set(cacheKey, attachment);
                     uploadedCampaignVoices.set(cleanUrl, attachment);
                     return attachment;
@@ -650,7 +650,7 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
         const audio = await vk.upload.audioMessage({ source: { value: buffer, filename } });
 
         if (audio?.owner_id && audio?.id) {
-            const attachment = `doc${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
+            const attachment = `audio_message${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
             uploadedCampaignVoices.set(cacheKey, attachment);
             if (cleanUrl) uploadedCampaignVoices.set(cleanUrl, attachment);
             return attachment;
@@ -670,8 +670,19 @@ app.post('/api/campaigns/send', async (req, res) => {
     const audience = filterRecipients(await loadRecipients(), segment, filters);
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
-    const photoAttachment = await uploadCampaignImage((imageUrl || image_url || '').trim());
-    const voiceAttachment = await uploadCampaignVoice({ voiceUrl: (voiceUrl || voice_url || '').trim(), voiceBase64, voiceName });
+    const requestedImage = (imageUrl || image_url || '').trim();
+    const requestedVoice = (voiceUrl || voice_url || '').trim();
+
+    const photoAttachment = await uploadCampaignImage(requestedImage);
+    const voiceAttachment = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
+
+    if (requestedImage && !photoAttachment) {
+        console.warn('Campaign send without photo attachment despite image URL', { campaignId, requestedImage });
+    }
+
+    if ((requestedVoice || voiceBase64) && !voiceAttachment) {
+        console.warn('Campaign send without voice attachment despite voice payload', { campaignId, requestedVoice, hasBase64: !!voiceBase64 });
+    }
     let sent = 0;
     const errors = [];
 
@@ -699,6 +710,7 @@ app.post('/api/campaigns/send', async (req, res) => {
 
             sent += 1;
         } catch (err) {
+            console.error('Failed to send campaign message', { user: user.vkId, err });
             errors.push({ user: user.vkId, message: err?.message || 'send_failed' });
         }
     }
@@ -707,6 +719,8 @@ app.post('/api/campaigns/send', async (req, res) => {
         sent,
         failed: errors.length,
         errors,
+        photoAttachment,
+        voiceAttachment,
         recipients: audience.map((u) => ({
             vkId: u.vkId,
             segment: u.segment,
