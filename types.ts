@@ -82,6 +82,9 @@ export interface Campaign {
   segment_target: UserSegment | 'ALL';
   message: string;
   image_url?: string;
+  voice_url?: string;
+  voice_base64?: string;
+  voice_name?: string;
   status: 'DRAFT' | 'SENT' | 'SCHEDULED';
   target_post_id?: number;
   stats: CampaignStats;

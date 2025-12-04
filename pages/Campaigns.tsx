@@ -18,6 +18,9 @@ const Campaigns: React.FC = () => {
     segment: 'ALL',
     message: '',
     imageUrl: '',
+    voiceUrl: '',
+    voiceData: '',
+    voiceName: '',
   });
 
   useEffect(() => {
@@ -25,10 +28,30 @@ const Campaigns: React.FC = () => {
     setCampaigns([...hydrated]);
   }, []);
 
+  const handleVoiceFile = (file?: File | null) => {
+    if (!file) {
+      setNewCampaign({ ...newCampaign, voiceData: '', voiceName: '', voiceUrl: newCampaign.voiceUrl });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setNewCampaign({
+        ...newCampaign,
+        voiceData: typeof reader.result === 'string' ? reader.result : '',
+        voiceUrl: '',
+        voiceName: file.name,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedImage = newCampaign.imageUrl.trim();
     const normalizedImage = trimmedImage || undefined;
+    const voiceSource = (newCampaign.voiceData || newCampaign.voiceUrl).trim();
+    const normalizedVoice = voiceSource || undefined;
     const camp: Campaign = {
         id: `c${Date.now()}`,
         name: newCampaign.name,
@@ -38,6 +61,9 @@ const Campaigns: React.FC = () => {
         image_url: normalizedImage,
         // Дублируем для обратной совместимости с разными полями
         ...(normalizedImage ? { imageUrl: normalizedImage } : { imageUrl: undefined } as any),
+        voice_url: normalizedVoice,
+        voice_base64: newCampaign.voiceData || undefined,
+        voice_name: newCampaign.voiceName || undefined,
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
@@ -46,7 +72,7 @@ const Campaigns: React.FC = () => {
     localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
     setCampaigns([camp, ...campaigns]);
     setIsCreating(false);
-    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '' });
+    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', voiceUrl: '', voiceData: '', voiceName: '' });
   };
 
   const handleLaunch = async (id: string) => {
@@ -178,22 +204,70 @@ const Campaigns: React.FC = () => {
 
             {newCampaign.type === CampaignType.STANDARD && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Картинка (опционально)</label>
-                  <input
-                    type="url"
-                    placeholder="https://...jpg"
-                    value={newCampaign.imageUrl}
-                    onChange={(e) => setNewCampaign({ ...newCampaign, imageUrl: e.target.value })}
-                    className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Вставьте прямую ссылку на изображение, чтобы отправить пуш с картинкой.</p>
+                <div className="md:col-span-2 space-y-5">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Картинка (опционально)</label>
+                    <input
+                      type="url"
+                      placeholder="https://...jpg"
+                      value={newCampaign.imageUrl}
+                      onChange={(e) => setNewCampaign({ ...newCampaign, imageUrl: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Вставьте прямую ссылку на изображение, чтобы отправить пуш с картинкой.</p>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-sm font-semibold text-gray-700">Голосовое сообщение (mp3, опционально)</label>
+                      {newCampaign.voiceData || newCampaign.voiceUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => setNewCampaign({ ...newCampaign, voiceData: '', voiceUrl: '', voiceName: '' })}
+                          className="text-xs text-gray-500 hover:text-gray-800"
+                        >
+                          Очистить
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-col gap-3">
+                      <input
+                        type="url"
+                        placeholder="https://.../voice.mp3"
+                        value={newCampaign.voiceUrl}
+                        onChange={(e) => setNewCampaign({ ...newCampaign, voiceUrl: e.target.value, voiceData: '', voiceName: '' })}
+                        className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
+                      />
+                      <div className="flex items-center gap-3">
+                        <label className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm text-sm font-semibold cursor-pointer hover:bg-gray-50">
+                          <input
+                            type="file"
+                            accept="audio/mpeg,audio/mp3,audio/*"
+                            className="hidden"
+                            onChange={(e) => handleVoiceFile(e.target.files?.[0])}
+                          />
+                          Загрузить mp3
+                        </label>
+                        {newCampaign.voiceName && (
+                          <span className="text-xs text-gray-600">{newCampaign.voiceName}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">Можно вставить ссылку или загрузить mp3-файл; он пойдет в рассылку как голосовое сообщение.</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg h-full min-h-[120px] flex items-center justify-center px-3 py-2 text-xs text-gray-500">
+                <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg h-full min-h-[120px] flex flex-col items-center justify-center px-3 py-2 text-xs text-gray-500 space-y-2">
                   {newCampaign.imageUrl ? (
                     <img src={newCampaign.imageUrl} alt="Превью" className="max-h-28 rounded" />
                   ) : (
-                    <span>Превью появится, когда добавите ссылку</span>
+                    <span className="text-center">Превью появится, когда добавите ссылку</span>
+                  )}
+                  {(newCampaign.voiceData || newCampaign.voiceUrl) && (
+                    <audio
+                      controls
+                      src={newCampaign.voiceData || newCampaign.voiceUrl}
+                      className="w-full"
+                    />
                   )}
                 </div>
               </div>
@@ -292,6 +366,7 @@ const Campaigns: React.FC = () => {
       <div className="grid grid-cols-1 gap-4">
         {filteredCampaigns.length > 0 ? filteredCampaigns.map(camp => {
             const preview = ((camp as any).imageUrl || camp.image_url || '').trim();
+            const voicePreview = ((camp as any).voice_url || (camp as any).voiceUrl || camp.voice_base64 || '').trim();
             const badge = statusView(camp.status);
             return (
               <div key={camp.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4 hover:border-red-200 transition-colors">
@@ -320,6 +395,9 @@ const Campaigns: React.FC = () => {
                   <div className="pl-6 flex flex-col items-end gap-3">
                     {preview && (
                       <img src={preview} alt={camp.name} className="w-28 h-20 object-cover rounded border border-gray-200 shadow-sm" />
+                    )}
+                    {voicePreview && (
+                      <audio controls src={camp.voice_base64 ? camp.voice_base64 : voicePreview} className="w-36" />
                     )}
                     {camp.status === 'SCHEDULED' ? (
                          <button

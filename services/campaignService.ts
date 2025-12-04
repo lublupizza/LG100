@@ -32,11 +32,16 @@ export const hydrateCampaigns = (): Campaign[] => {
     if (Array.isArray(parsed)) {
       const normalized = parsed.map((c: any) => {
         const image = c.image_url || c.imageUrl;
+        const voice = c.voice_url || c.voiceUrl || c.voice_base64;
         return {
           ...c,
           image_url: image,
           // сохраняем дублирующее поле, чтобы старые записи корректно показывали превью
           imageUrl: image,
+          voice_url: voice,
+          voiceUrl: voice,
+          voice_base64: c.voice_base64 || (typeof voice === 'string' && voice.startsWith('data:') ? voice : undefined),
+          voice_name: c.voice_name,
         };
       });
 
@@ -58,12 +63,17 @@ export const launchCampaign = async (
 
   // Нормализуем ссылку на изображение один раз
   const image = ((campaign as any).imageUrl || campaign.image_url || '').trim();
+  const voiceUrl = ((campaign as any).voice_url || (campaign as any).voiceUrl || '').trim();
+  const voiceBase64 = (campaign as any).voice_base64 || '';
 
   // Проставляем нормализованную картинку в объект, чтобы сохранить при обновлении
   const hydratedCampaign: Campaign = {
     ...campaign,
     image_url: image || undefined,
     ...(image ? { imageUrl: image } : { imageUrl: undefined } as any),
+    voice_url: voiceUrl || voiceBase64 || undefined,
+    ...(voiceUrl ? { voiceUrl } : voiceBase64 ? { voiceUrl: undefined } : {} as any),
+    voice_base64: voiceBase64 || undefined,
   };
 
   // 1. Отбор аудитории
@@ -96,6 +106,10 @@ export const launchCampaign = async (
           segment: campaign.segment_target,
           imageUrl: image,
           image_url: image,
+          voiceUrl: voiceUrl,
+          voice_url: voiceUrl,
+          voiceBase64: voiceBase64,
+          voiceName: (campaign as any).voice_name,
           filters,
         }),
       });

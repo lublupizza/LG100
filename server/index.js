@@ -23,7 +23,7 @@ const prisma = new PrismaClient();
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // === ГРАФИКА ===
@@ -308,6 +308,24 @@ const zlib = require('zlib');
 
 // Кэшируем уже загруженные вложения, чтобы не дергать загрузку при повторных отправках
 const uploadedCampaignPhotos = new Map();
+const uploadedCampaignVoices = new Map();
+
+const parseBase64DataUri = (dataUri = '') => {
+    const match = dataUri.match(/^data:([^;]+);base64,(.*)$/);
+    if (!match) return null;
+
+    const contentType = match[1];
+    const base64Payload = match[2];
+    try {
+        return {
+            buffer: Buffer.from(base64Payload, 'base64'),
+            contentType,
+        };
+    } catch (err) {
+        console.error('Failed to parse base64 voice', err);
+        return null;
+    }
+};
 
 const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
     if (!imageUrl) return reject(new Error('Image URL not provided'));
@@ -375,6 +393,72 @@ const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, 
     }
 });
 
+const fetchAudioBuffer = (audioUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
+    if (!audioUrl) return reject(new Error('Audio URL not provided'));
+
+    try {
+        const url = new URL(audioUrl.trim());
+        const client = url.protocol === 'https:' ? https : http;
+
+        const request = client.get({
+            protocol: url.protocol,
+            hostname: url.hostname,
+            port: url.port || undefined,
+            path: url.pathname + (url.search || ''),
+            headers: {
+                'Accept': 'audio/mpeg,audio/*;q=0.9,*/*;q=0.8',
+                'Accept-Encoding': 'identity',
+                'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)',
+                'Host': url.hostname,
+            },
+        }, (response) => {
+            if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                if (redirectDepth > 3) return reject(new Error('Too many redirects while fetching audio'));
+                const redirectUrl = new URL(response.headers.location, url);
+                return resolve(fetchAudioBuffer(redirectUrl.toString(), redirectDepth + 1));
+            }
+
+            if (response.statusCode !== 200) {
+                return reject(new Error(`Failed to fetch audio. Status: ${response.statusCode}`));
+            }
+
+            const contentType = response.headers['content-type'] || '';
+            const encoding = (response.headers['content-encoding'] || 'identity').toLowerCase();
+            const chunks = [];
+            response.on('data', (chunk) => chunks.push(chunk));
+            response.on('end', () => {
+                const rawBuffer = Buffer.concat(chunks);
+
+                const finish = (buffer) => resolve({ buffer, contentType });
+
+                if (encoding === 'gzip') {
+                    return zlib.gunzip(rawBuffer, (err, decompressed) => {
+                        if (err) return reject(err);
+                        return finish(decompressed);
+                    });
+                }
+
+                if (encoding === 'deflate') {
+                    return zlib.inflate(rawBuffer, (err, decompressed) => {
+                        if (err) return reject(err);
+                        return finish(decompressed);
+                    });
+                }
+
+                return finish(rawBuffer);
+            });
+        });
+
+        request.setTimeout(15000, () => {
+            request.destroy(new Error('Audio request timed out'));
+        });
+
+        request.on('error', reject);
+    } catch (err) {
+        reject(err);
+    }
+});
+
 const pickExtension = (contentType = '', fallback = 'jpg') => {
     if (contentType.includes('png')) return 'png';
     if (contentType.includes('jpeg')) return 'jpg';
@@ -421,8 +505,58 @@ const uploadCampaignImage = async (imageUrl) => {
     return null;
 };
 
+const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) => {
+    const cleanUrl = (voiceUrl || '').trim();
+    const cleanBase64 = (voiceBase64 || '').trim();
+    const cacheKey = cleanBase64 ? `data:${cleanBase64.length}:${cleanBase64.slice(0, 32)}` : cleanUrl;
+
+    if (cacheKey && uploadedCampaignVoices.has(cacheKey)) {
+        return uploadedCampaignVoices.get(cacheKey);
+    }
+
+    try {
+        let buffer;
+        let contentType = 'audio/mpeg';
+        let filename = voiceName || 'voice.mp3';
+
+        if (cleanBase64) {
+            const parsed = parseBase64DataUri(cleanBase64) || { buffer: null, contentType: null };
+            buffer = parsed.buffer;
+            contentType = parsed.contentType || contentType;
+        } else if (cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
+            const fetched = await fetchAudioBuffer(cleanUrl);
+            buffer = fetched.buffer;
+            contentType = fetched.contentType || contentType;
+            if (!voiceName) {
+                filename = `voice.${pickExtension(contentType, 'mp3')}`;
+            }
+        }
+
+        if (!buffer || buffer.length === 0) {
+            return null;
+        }
+
+        if (!filename.includes('.')) {
+            filename = `${filename}.${pickExtension(contentType, 'mp3')}`;
+        }
+
+        const audio = await vk.upload.audioMessage({ source: { value: buffer, filename } });
+
+        if (audio?.owner_id && audio?.id) {
+            const attachment = `doc${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
+            uploadedCampaignVoices.set(cacheKey, attachment);
+            if (cleanUrl) uploadedCampaignVoices.set(cleanUrl, attachment);
+            return attachment;
+        }
+    } catch (err) {
+        console.error('Voice upload failed', err);
+    }
+
+    return null;
+};
+
 app.post('/api/campaigns/send', async (req, res) => {
-    const { campaignId, message, type, segment = 'ALL', imageUrl, image_url, filters = {} } = req.body || {};
+    const { campaignId, message, type, segment = 'ALL', imageUrl, image_url, voiceUrl, voice_url, voiceBase64, voiceName, filters = {} } = req.body || {};
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
@@ -430,6 +564,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
     const photoAttachment = await uploadCampaignImage((imageUrl || image_url || '').trim());
+    const voiceAttachment = await uploadCampaignVoice({ voiceUrl: (voiceUrl || voice_url || '').trim(), voiceBase64, voiceName });
     let sent = 0;
     const errors = [];
 
@@ -445,8 +580,12 @@ app.post('/api/campaigns/send', async (req, res) => {
                 message: intro,
             };
 
-            if (photoAttachment) {
-                payload.attachment = photoAttachment;
+            const attachments = [];
+            if (photoAttachment) attachments.push(photoAttachment);
+            if (voiceAttachment) attachments.push(voiceAttachment);
+
+            if (attachments.length > 0) {
+                payload.attachment = attachments.join(',');
             }
 
             await vk.api.messages.send(payload);
