@@ -6,33 +6,77 @@ import { isDateInPeriod } from '../utils/dateHelpers';
 // Мок-база отправок (в реале - таблица SQL campaign_sends)
 export const mockCampaignSends: CampaignSend[] = [];
 
+const persistSends = () => {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        localStorage.setItem('campaign_sends', JSON.stringify(mockCampaignSends));
+    } catch (e) {
+        console.warn('Failed to persist campaign sends', e);
+    }
+};
+
+const hydrateSends = () => {
+    if (typeof localStorage === 'undefined') return;
+    const stored = localStorage.getItem('campaign_sends');
+    if (!stored) return;
+
+    try {
+        const parsed = JSON.parse(stored) as CampaignSend[];
+        if (Array.isArray(parsed)) {
+            mockCampaignSends.splice(0, mockCampaignSends.length, ...parsed);
+        }
+    } catch (e) {
+        console.warn('Failed to hydrate campaign sends', e);
+    }
+};
+
+hydrateSends();
+
 /**
  * 1. Создание записи об отправке
  */
-export const recordCampaignSend = (campaignId: string, userId: number, vkMessageId?: number) => {
+export const recordCampaignSend = (
+    campaignId: string,
+    opts: { userId?: number; vkId?: number; segment?: UserSegment | 'ALL'; vkMessageId?: number } = {}
+) => {
+    const { userId, vkId, segment, vkMessageId } = opts;
+
     // Проверяем, не отправляли ли уже (для идемпотентности моков)
-    const exists = mockCampaignSends.some(s => s.campaign_id === campaignId && s.user_id === userId);
+    const exists = mockCampaignSends.some(
+        (s) => s.campaign_id === campaignId && (s.user_id === userId || (vkId && s.user_vk_id === vkId))
+    );
     if (exists) return;
 
     mockCampaignSends.push({
-        id: `send_${Date.now()}_${userId}_${Math.random()}`,
+        id: `send_${Date.now()}_${userId ?? vkId}_${Math.random()}`,
         campaign_id: campaignId,
         user_id: userId,
+        user_vk_id: vkId,
+        segment,
         vk_message_id: vkMessageId,
-        sent_at: new Date().toISOString()
+        sent_at: new Date().toISOString(),
     });
+
+    persistSends();
 };
 
 /**
  * 2. Регистрация реакции пользователя (View / Action)
  * Вызывается из registerEvent или VK Handler
  */
-export const trackCampaignReaction = (userId: number, actionType: EventType | string, campaignId?: string, postId?: number) => {
+export const trackCampaignReaction = (
+    userId: number,
+    actionType: EventType | string,
+    campaignId?: string,
+    postId?: number
+) => {
     let sendRecord: CampaignSend | undefined;
 
     // Сценарий А: Явно передан campaign_id (через payload кнопки/игры)
     if (campaignId) {
-        sendRecord = mockCampaignSends.find(s => s.campaign_id === campaignId && s.user_id === userId);
+        sendRecord = mockCampaignSends.find(
+            (s) => s.campaign_id === campaignId && (s.user_id === userId || s.user_vk_id === userId)
+        );
     }
     // Сценарий Б: Реакция на пост (ищем активную кампанию по этому посту)
     else if (postId) {
@@ -41,7 +85,9 @@ export const trackCampaignReaction = (userId: number, actionType: EventType | st
         if (campaign) {
              // Ищем отправку этому юзеру по этой кампании
              // Важно: проверяем, что отправка была недавно (например, в последние 14 дней)
-             sendRecord = mockCampaignSends.find(s => s.campaign_id === campaign.id && s.user_id === userId);
+             sendRecord = mockCampaignSends.find(
+                (s) => s.campaign_id === campaign.id && (s.user_id === userId || s.user_vk_id === userId)
+             );
              
              // Доп. проверка: если отправка была слишком давно ( > 14 дней), не считаем это реакцией на кампанию
              if (sendRecord && new Date(sendRecord.sent_at).getTime() < Date.now() - 14 * 24 * 60 * 60 * 1000) {
@@ -66,6 +112,8 @@ export const trackCampaignReaction = (userId: number, actionType: EventType | st
         sendRecord.first_action_type = actionType;
         console.log(`[Campaign Tracker] User ${userId} ACTION in campaign ${sendRecord.campaign_id} via ${actionType}`);
     }
+
+    persistSends();
 };
 
 /**
@@ -91,7 +139,11 @@ export const getCampaignReactionStats = (campaignId: string, period: TimePeriod 
  */
 export const getCampaignFunnel = (campaignId: string, period: TimePeriod = 'ALL'): CampaignFunnelStats => {
     // 1. Выбираем отправки конкретной кампании
-    const sends = mockCampaignSends.filter(s => s.campaign_id === campaignId);
+    const sends = mockCampaignSends.filter((s) => {
+        if (s.campaign_id !== campaignId) return false;
+        if (period === 'ALL') return true;
+        return isDateInPeriod(s.sent_at, period);
+    });
     const total = sends.length;
 
     if (total === 0) {
@@ -117,7 +169,8 @@ export const getCampaignFunnel = (campaignId: string, period: TimePeriod = 'ALL'
     // Здесь считаем среди тех, кто СОВЕРШИЛ ДЕЙСТВИЕ, сколько из них сейчас Warm/Hot
     actedSends.forEach(s => {
         const user = mockUsers.find(u => u.id === s.user_id);
-        if (user && (user.segment === UserSegment.WARM || user.segment === UserSegment.HOT)) {
+        const segment = s.segment ?? user?.segment;
+        if (segment === UserSegment.WARM || segment === UserSegment.HOT) {
             warmHotCount++;
         }
     });
@@ -153,5 +206,66 @@ export const getCampaignFunnel = (campaignId: string, period: TimePeriod = 'ALL'
         warm_hot_rate: Math.round((warmHotCount / total) * 100),
         // Конверсия в Warm/Hot от тех, кто действовал
         warm_hot_from_acted: actedSends.length > 0 ? Math.round((warmHotCount / actedSends.length) * 100) : 0
+    };
+};
+
+/**
+ * 5. Воронка по всем кампаниям за период
+ * Используется в админке как сводка "успешных рассылок" без привязки к конкретной кампании
+ */
+export const getCampaignFunnelForPeriod = (period: TimePeriod = 'ALL'): CampaignFunnelStats => {
+    const sends = mockCampaignSends.filter((s) => period === 'ALL' || isDateInPeriod(s.sent_at, period));
+    const total = sends.length;
+
+    if (total === 0) {
+        return {
+            recipients_total: 0,
+            views: 0,
+            view_conversion: 0,
+            actions_total: 0,
+            action_conversion: 0,
+            avg_delay_seconds: 0,
+            actions_by_type: {},
+            warm_hot_count: 0,
+            warm_hot_rate: 0,
+            warm_hot_from_acted: 0,
+        };
+    }
+
+    const viewedSends = sends.filter((s) => s.viewed_at && isDateInPeriod(s.viewed_at, period));
+    const actedSends = sends.filter((s) => s.first_action_at && isDateInPeriod(s.first_action_at, period));
+
+    let warmHotCount = 0;
+    actedSends.forEach((s) => {
+        const user = mockUsers.find((u) => u.id === s.user_id || u.vk_id === s.user_vk_id);
+        const segment = s.segment ?? user?.segment;
+        if (segment === UserSegment.WARM || segment === UserSegment.HOT) {
+            warmHotCount++;
+        }
+    });
+
+    const actionsByType: Record<string, number> = {};
+    let totalDelay = 0;
+
+    actedSends.forEach((s) => {
+        if (s.first_action_type) {
+            actionsByType[s.first_action_type] = (actionsByType[s.first_action_type] || 0) + 1;
+        }
+        if (s.first_action_at && s.sent_at) {
+            totalDelay += new Date(s.first_action_at).getTime() - new Date(s.sent_at).getTime();
+        }
+    });
+
+    return {
+        recipients_total: total,
+        views: viewedSends.length,
+        view_conversion: Math.round((viewedSends.length / total) * 100),
+        actions_total: actedSends.length,
+        action_conversion: Math.round((actedSends.length / total) * 100),
+        avg_delay_seconds: actedSends.length > 0 ? Math.round(totalDelay / actedSends.length / 1000) : 0,
+        actions_by_type: actionsByType,
+        warm_hot_count: warmHotCount,
+        warm_hot_rate: Math.round((warmHotCount / total) * 100),
+        warm_hot_from_acted: actedSends.length > 0 ? Math.round((warmHotCount / actedSends.length) * 100) : 0,
     };
 };
