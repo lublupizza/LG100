@@ -654,7 +654,7 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
                     const attachment = `audio_message${direct.owner_id}_${direct.id}${direct.access_key ? '_' + direct.access_key : ''}`;
                     uploadedCampaignVoices.set(cacheKey, attachment);
                     uploadedCampaignVoices.set(cleanUrl, attachment);
-                    return attachment;
+                    return { attachment };
                 }
             } catch (directErr) {
                 console.warn('Direct voice upload failed, fallback to buffer', directErr?.message || directErr);
