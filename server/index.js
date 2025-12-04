@@ -638,7 +638,7 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
     const cacheKey = cleanBase64 ? `data:${cleanBase64.length}:${cleanBase64.slice(0, 32)}` : cleanUrl;
 
     if (cacheKey && uploadedCampaignVoices.has(cacheKey)) {
-        return uploadedCampaignVoices.get(cacheKey);
+        return { attachment: uploadedCampaignVoices.get(cacheKey) };
     }
 
     try {
@@ -710,8 +710,11 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
         if (attachment) {
             uploadedCampaignVoices.set(cacheKey, attachment);
             if (cleanUrl) uploadedCampaignVoices.set(cleanUrl, attachment);
-            return attachment;
+            return { attachment };
         }
+
+        // Возвращаем буфер, чтобы можно было попытаться отправить по peer_id в цикле отправки
+        return { attachment: null, buffer, filename };
     } catch (err) {
         console.error('Voice upload failed', err);
     }
@@ -731,7 +734,10 @@ app.post('/api/campaigns/send', async (req, res) => {
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
     const photoAttachment = await uploadCampaignImage(requestedImage);
-    const voiceAttachment = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
+    const voiceResult = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
+    let voiceAttachment = voiceResult?.attachment || null;
+    let voiceBuffer = voiceResult?.buffer;
+    const voiceFilename = voiceResult?.filename;
 
     if (requestedImage && !photoAttachment) {
         console.warn('Campaign send without photo attachment despite image URL', { campaignId, requestedImage });
@@ -757,6 +763,20 @@ app.post('/api/campaigns/send', async (req, res) => {
 
             const attachments = [];
             if (photoAttachment) attachments.push(photoAttachment);
+
+            // Если общий голосовой аттачмент отсутствует, но есть подготовленный буфер, пробуем загрузить под конкретный peer_id
+            if (!voiceAttachment && voiceBuffer) {
+                try {
+                    const audio = await vk.upload.audioMessage({ peer_id: user.vkId, source: { value: voiceBuffer, filename: voiceFilename || 'voice.ogg' } });
+                    if (audio?.owner_id && audio?.id) {
+                        voiceAttachment = `audio_message${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
+                        uploadedCampaignVoices.set(requestedVoice || voiceBase64 || `peer:${user.vkId}`, voiceAttachment);
+                    }
+                } catch (peerUploadErr) {
+                    console.error('Peer-specific voice upload failed', peerUploadErr);
+                }
+            }
+
             if (voiceAttachment) attachments.push(voiceAttachment);
 
             if (attachments.length > 0) {
