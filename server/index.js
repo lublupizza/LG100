@@ -309,6 +309,7 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
 };
 
 const zlib = require('zlib');
+const { Blob, FormData } = globalThis;
 
 // Кэшируем уже загруженные вложения, чтобы не дергать загрузку при повторных отправках
 const uploadedCampaignPhotos = new Map();
@@ -494,6 +495,46 @@ const pickExtension = (contentType = '', fallback = 'jpg') => {
     return fallback;
 };
 
+const uploadAudioMessageViaDocs = async ({ buffer, filename, contentType }) => {
+    if (!buffer || buffer.length === 0) return null;
+
+    const safeFilename = filename || 'voice.ogg';
+    try {
+        const uploadServer = await vk.api.docs.getMessagesUploadServer({ type: 'audio_message' });
+        if (!uploadServer?.upload_url) throw new Error('Missing upload url for audio_message');
+
+        if (typeof fetch !== 'function' || typeof FormData === 'undefined' || typeof Blob === 'undefined') {
+            throw new Error('fetch/FormData/Blob not available for docs upload');
+        }
+
+        const form = new FormData();
+        const blob = new Blob([buffer], { type: contentType || 'audio/ogg' });
+        form.append('file', blob, safeFilename);
+
+        const uploadResponse = await fetch(uploadServer.upload_url, {
+            method: 'POST',
+            body: form,
+        });
+
+        const uploadJson = await uploadResponse.json();
+        if (!uploadJson?.file) throw new Error('docs upload did not return file token');
+
+        const saved = await vk.api.docs.save({ file: uploadJson.file, title: safeFilename });
+        const docPayload = saved?.audio_message || saved?.doc || (Array.isArray(saved) ? (saved[0]?.audio_message || saved[0]?.doc || saved[0]) : saved);
+
+        const ownerId = docPayload?.owner_id;
+        const audioId = docPayload?.id;
+        const accessKey = docPayload?.access_key;
+
+        if (!ownerId || !audioId) throw new Error('docs.save returned no owner/id for audio_message');
+
+        return `audio_message${ownerId}_${audioId}${accessKey ? '_' + accessKey : ''}`;
+    } catch (err) {
+        console.error('docs audio_message upload failed', err);
+        return null;
+    }
+};
+
 const ensureOpusAudio = async ({ buffer, contentType, filename }) => {
     const hasData = buffer && buffer.length > 0;
     const alreadyOgg = (contentType || '').includes('ogg') || (contentType || '').includes('opus') || (filename || '').endsWith('.ogg');
@@ -630,7 +671,7 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
             buffer = fetched.buffer;
             contentType = fetched.contentType || contentType;
             if (!voiceName) {
-                filename = `voice.${pickExtension(contentType, 'mp3')}`;
+                filename = `voice.${pickAudioExtension(contentType, 'mp3')}`;
             }
         }
 
@@ -647,10 +688,20 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
             filename = `${filename}.${pickAudioExtension(contentType, 'ogg')}`;
         }
 
-        const audio = await vk.upload.audioMessage({ source: { value: buffer, filename } });
+        let attachment = await uploadAudioMessageViaDocs({ buffer, filename, contentType });
 
-        if (audio?.owner_id && audio?.id) {
-            const attachment = `audio_message${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
+        if (!attachment) {
+            try {
+                const audio = await vk.upload.audioMessage({ source: { value: buffer, filename } });
+                if (audio?.owner_id && audio?.id) {
+                    attachment = `audio_message${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
+                }
+            } catch (uploadErr) {
+                console.error('Fallback VK audioMessage upload failed', uploadErr);
+            }
+        }
+
+        if (attachment) {
             uploadedCampaignVoices.set(cacheKey, attachment);
             if (cleanUrl) uploadedCampaignVoices.set(cleanUrl, attachment);
             return attachment;
