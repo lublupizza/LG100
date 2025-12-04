@@ -737,13 +737,29 @@ app.post('/api/campaigns/send', async (req, res) => {
     const voiceResult = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
     let voiceAttachment = voiceResult?.attachment || null;
     let voiceBuffer = voiceResult?.buffer;
-    const voiceFilename = voiceResult?.filename;
+    let voiceFilename = voiceResult?.filename;
 
     if (requestedImage && !photoAttachment) {
         console.warn('Campaign send without photo attachment despite image URL', { campaignId, requestedImage });
     }
 
-    if ((requestedVoice || voiceBase64) && !voiceAttachment) {
+    if ((requestedVoice || voiceBase64) && !voiceAttachment && !voiceBuffer) {
+        try {
+            if (voiceBase64) {
+                const parsed = parseBase64DataUri(voiceBase64);
+                voiceBuffer = parsed?.buffer;
+                voiceFilename = parsed?.filename || voiceFilename || voiceName || 'voice.ogg';
+            } else if (requestedVoice && (requestedVoice.startsWith('http://') || requestedVoice.startsWith('https://'))) {
+                const fetched = await fetchAudioBuffer(requestedVoice);
+                voiceBuffer = fetched?.buffer;
+                voiceFilename = voiceFilename || voiceName || `voice.${pickAudioExtension(fetched?.contentType, 'mp3')}`;
+            }
+        } catch (fallbackErr) {
+            console.warn('Unable to recover voice buffer for campaign send', fallbackErr?.message || fallbackErr);
+        }
+    }
+
+    if ((requestedVoice || voiceBase64) && !voiceAttachment && !voiceBuffer) {
         console.warn('Campaign send without voice attachment despite voice payload', { campaignId, requestedVoice, hasBase64: !!voiceBase64 });
     }
     let sent = 0;
