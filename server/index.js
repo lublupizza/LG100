@@ -311,18 +311,34 @@ const uploadedCampaignPhotos = new Map();
 const uploadedCampaignVoices = new Map();
 
 const parseBase64DataUri = (dataUri = '') => {
-    const match = dataUri.match(/^data:([^;]+);base64,(.*)$/);
-    if (!match) return null;
+    const trimmed = dataUri.trim();
+    const match = trimmed.match(/^data:([^;]+);base64,(.*)$/);
 
-    const contentType = match[1];
-    const base64Payload = match[2];
+    // data URL с content-type
+    if (match) {
+        const contentType = match[1];
+        const base64Payload = match[2];
+        try {
+            return {
+                buffer: Buffer.from(base64Payload, 'base64'),
+                contentType,
+            };
+        } catch (err) {
+            console.error('Failed to parse base64 voice', err);
+            return null;
+        }
+    }
+
+    // «голый» base64 без префикса
     try {
+        const clean = trimmed.replace(/\s+/g, '');
+        if (!clean) return null;
         return {
-            buffer: Buffer.from(base64Payload, 'base64'),
-            contentType,
+            buffer: Buffer.from(clean, 'base64'),
+            contentType: 'audio/mpeg',
         };
     } catch (err) {
-        console.error('Failed to parse base64 voice', err);
+        console.error('Failed to parse raw base64 voice', err);
         return null;
     }
 };
@@ -519,6 +535,22 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
         let contentType = 'audio/mpeg';
         let filename = voiceName || 'voice.mp3';
 
+        // 1) Пробуем напрямую загрузить с ссылки силами VK, если она валидная
+        if (cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
+            try {
+                const direct = await vk.upload.audioMessage({ source: { url: cleanUrl } });
+                if (direct?.owner_id && direct?.id) {
+                    const attachment = `doc${direct.owner_id}_${direct.id}${direct.access_key ? '_' + direct.access_key : ''}`;
+                    uploadedCampaignVoices.set(cacheKey, attachment);
+                    uploadedCampaignVoices.set(cleanUrl, attachment);
+                    return attachment;
+                }
+            } catch (directErr) {
+                console.warn('Direct voice upload failed, fallback to buffer', directErr?.message || directErr);
+            }
+        }
+
+        // 2) Собираем буфер из base64 или качаем файл
         if (cleanBase64) {
             const parsed = parseBase64DataUri(cleanBase64) || { buffer: null, contentType: null };
             buffer = parsed.buffer;
