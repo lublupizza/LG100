@@ -495,12 +495,12 @@ const pickExtension = (contentType = '', fallback = 'jpg') => {
     return fallback;
 };
 
-const uploadAudioMessageViaDocs = async ({ buffer, filename, contentType }) => {
+const uploadAudioMessageViaDocs = async ({ buffer, filename, contentType, peerId }) => {
     if (!buffer || buffer.length === 0) return null;
 
     const safeFilename = filename || 'voice.ogg';
     try {
-        const uploadServer = await vk.api.docs.getMessagesUploadServer({ type: 'audio_message' });
+        const uploadServer = await vk.api.docs.getMessagesUploadServer({ type: 'audio_message', ...(peerId ? { peer_id: peerId } : {}) });
         if (!uploadServer?.upload_url) throw new Error('Missing upload url for audio_message');
 
         if (typeof fetch !== 'function' || typeof FormData === 'undefined' || typeof Blob === 'undefined') {
@@ -589,6 +589,13 @@ const ensureOpusAudio = async ({ buffer, contentType, filename }) => {
             contentType: 'audio/ogg',
             filename: `${(filename || 'voice').replace(/\.[^/.]+$/, '')}.ogg`,
         };
+    } catch (err) {
+        console.error('FFmpeg opus conversion failed, falling back to original audio', err);
+        return {
+            buffer,
+            contentType: contentType || 'audio/mpeg',
+            filename: filename || `voice.${pickAudioExtension(contentType, 'mp3')}`,
+        };
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -641,10 +648,11 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
         return { attachment: uploadedCampaignVoices.get(cacheKey) };
     }
 
+    let buffer;
+    let contentType = 'audio/mpeg';
+    let filename = voiceName || 'voice.mp3';
+
     try {
-        let buffer;
-        let contentType = 'audio/mpeg';
-        let filename = voiceName || 'voice.mp3';
 
         // 1) Пробуем напрямую загрузить с ссылки силами VK, если она валидная
         if (cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
@@ -717,9 +725,8 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
         return { attachment: null, buffer, filename };
     } catch (err) {
         console.error('Voice upload failed', err);
+        return buffer ? { attachment: null, buffer, filename } : null;
     }
-
-    return null;
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
@@ -783,13 +790,21 @@ app.post('/api/campaigns/send', async (req, res) => {
             // Если общий голосовой аттачмент отсутствует, но есть подготовленный буфер, пробуем загрузить под конкретный peer_id
             if (!voiceAttachment && voiceBuffer) {
                 try {
-                    const audio = await vk.upload.audioMessage({ peer_id: user.vkId, source: { value: voiceBuffer, filename: voiceFilename || 'voice.ogg' } });
-                    if (audio?.owner_id && audio?.id) {
-                        voiceAttachment = `audio_message${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
-                        uploadedCampaignVoices.set(requestedVoice || voiceBase64 || `peer:${user.vkId}`, voiceAttachment);
+                    voiceAttachment = await uploadAudioMessageViaDocs({ buffer: voiceBuffer, filename: voiceFilename || 'voice.ogg', contentType: 'audio/ogg', peerId: user.vkId });
+                } catch (peerDocsErr) {
+                    console.warn('Peer docs voice upload failed, fallback to audioMessage', peerDocsErr);
+                }
+
+                if (!voiceAttachment) {
+                    try {
+                        const audio = await vk.upload.audioMessage({ peer_id: user.vkId, source: { value: voiceBuffer, filename: voiceFilename || 'voice.ogg' } });
+                        if (audio?.owner_id && audio?.id) {
+                            voiceAttachment = `audio_message${audio.owner_id}_${audio.id}${audio.access_key ? '_' + audio.access_key : ''}`;
+                            uploadedCampaignVoices.set(requestedVoice || voiceBase64 || `peer:${user.vkId}`, voiceAttachment);
+                        }
+                    } catch (peerUploadErr) {
+                        console.error('Peer-specific voice upload failed', peerUploadErr);
                     }
-                } catch (peerUploadErr) {
-                    console.error('Peer-specific voice upload failed', peerUploadErr);
                 }
             }
 
