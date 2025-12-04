@@ -4,10 +4,14 @@ const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { spawn } = require('child_process');
 const { createCanvas } = require('canvas');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
+const ffmpegPath = require('ffmpeg-static');
 
 const TOKEN = process.env.VK_TOKEN;
 const PORT = process.env.PORT || 3005;
@@ -475,12 +479,78 @@ const fetchAudioBuffer = (audioUrl, redirectDepth = 0) => new Promise((resolve, 
     }
 });
 
+const pickAudioExtension = (contentType = '', fallback = 'mp3') => {
+    if (contentType.includes('ogg') || contentType.includes('opus')) return 'ogg';
+    if (contentType.includes('mpeg') || contentType.includes('mp3')) return 'mp3';
+    if (contentType.includes('wav')) return 'wav';
+    return fallback;
+};
+
 const pickExtension = (contentType = '', fallback = 'jpg') => {
     if (contentType.includes('png')) return 'png';
     if (contentType.includes('jpeg')) return 'jpg';
     if (contentType.includes('jpg')) return 'jpg';
     if (contentType.includes('gif')) return 'gif';
     return fallback;
+};
+
+const ensureOpusAudio = async ({ buffer, contentType, filename }) => {
+    const hasData = buffer && buffer.length > 0;
+    const alreadyOgg = (contentType || '').includes('ogg') || (contentType || '').includes('opus') || (filename || '').endsWith('.ogg');
+
+    if (!hasData) return { buffer, contentType, filename };
+
+    if (alreadyOgg) {
+        return {
+            buffer,
+            contentType: 'audio/ogg',
+            filename: filename && filename.includes('.') ? filename : `${filename || 'voice'}.ogg`,
+        };
+    }
+
+    if (!ffmpegPath) {
+        return {
+            buffer,
+            contentType: contentType || 'audio/mpeg',
+            filename: filename || `voice.${pickAudioExtension(contentType, 'mp3')}`,
+        };
+    }
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'campaign-voice-'));
+    const inputPath = path.join(tmpDir, `input.${pickAudioExtension(contentType, 'mp3')}`);
+    const outputPath = path.join(tmpDir, 'output.ogg');
+
+    fs.writeFileSync(inputPath, buffer);
+
+    try {
+        await new Promise((resolve, reject) => {
+            const ff = spawn(ffmpegPath, [
+                '-y',
+                '-i', inputPath,
+                '-ar', '16000',
+                '-ac', '1',
+                '-b:a', '16k',
+                '-c:a', 'libopus',
+                outputPath,
+            ]);
+
+            ff.on('error', reject);
+            ff.on('close', (code) => {
+                if (code === 0) return resolve();
+                return reject(new Error(`ffmpeg exited with code ${code}`));
+            });
+        });
+
+        const converted = fs.readFileSync(outputPath);
+
+        return {
+            buffer: converted,
+            contentType: 'audio/ogg',
+            filename: `${(filename || 'voice').replace(/\.[^/.]+$/, '')}.ogg`,
+        };
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
 };
 
 const uploadCampaignImage = async (imageUrl) => {
@@ -568,8 +638,13 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
             return null;
         }
 
+        const normalized = await ensureOpusAudio({ buffer, contentType, filename });
+        buffer = normalized.buffer;
+        contentType = normalized.contentType || contentType;
+        filename = normalized.filename || filename;
+
         if (!filename.includes('.')) {
-            filename = `${filename}.${pickExtension(contentType, 'mp3')}`;
+            filename = `${filename}.${pickAudioExtension(contentType, 'ogg')}`;
         }
 
         const audio = await vk.upload.audioMessage({ source: { value: buffer, filename } });
