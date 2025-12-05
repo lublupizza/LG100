@@ -107,8 +107,11 @@ const Campaigns: React.FC = () => {
         });
         if (updatedCampaign) {
             setCampaigns(prev => prev.map(c => c.id === id ? updatedCampaign : c));
-            localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
         }
+        // Всегда синхронизируем с локальным хранилищем после запуска, чтобы статусы не зависали в "АКТИВНА"
+        const hydrated = hydrateCampaigns();
+        setCampaigns([...hydrated]);
+        localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
     }
   };
 

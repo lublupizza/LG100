@@ -620,10 +620,11 @@ const uploadCampaignImage = async ({ imageUrl, imageBase64, imageName } = {}) =>
         if (cleanBase64) {
             const parsed = parseBase64DataUri(cleanBase64, 'image/jpeg');
             if (parsed?.buffer) {
+                const ext = pickExtension(parsed.contentType || '', filename.split('.').pop() || 'jpg');
                 return {
                     attachment: null,
                     buffer: parsed.buffer,
-                    filename,
+                    filename: filename.includes('.') ? filename : `campaign.${ext}`,
                 };
             }
         }
@@ -835,6 +836,24 @@ app.post('/api/campaigns/send', async (req, res) => {
                     }
                 } catch (peerPhotoErr) {
                     console.warn('Peer-specific photo upload failed', peerPhotoErr?.message || peerPhotoErr);
+                }
+            }
+
+            // Если буфер отсутствует, но есть валидная ссылка на картинку — скачиваем и пробуем загрузить под конкретного получателя
+            if (!photoAttachment && !photoBuffer && requestedImage && (requestedImage.startsWith('http://') || requestedImage.startsWith('https://'))) {
+                try {
+                    const fetched = await fetchImageBuffer(requestedImage);
+                    if (fetched?.buffer) {
+                        photoBuffer = fetched.buffer;
+                        photoFilename = `image.${pickExtension(fetched.contentType)}`;
+                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                        if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                            photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                            uploadedCampaignPhotos.set(requestedImage, photoAttachment);
+                        }
+                    }
+                } catch (latePhotoErr) {
+                    console.warn('Deferred peer photo upload failed', latePhotoErr?.message || latePhotoErr);
                 }
             }
 
