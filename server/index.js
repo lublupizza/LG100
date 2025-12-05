@@ -606,8 +606,11 @@ const uploadCampaignImage = async (imageUrl) => {
     if (!cleanUrl || (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://'))) return null;
 
     if (uploadedCampaignPhotos.has(cleanUrl)) {
-        return uploadedCampaignPhotos.get(cleanUrl);
+        return { attachment: uploadedCampaignPhotos.get(cleanUrl) };
     }
+
+    let buffer = null;
+    let filename = 'campaign.jpg';
 
     try {
         try {
@@ -615,28 +618,30 @@ const uploadCampaignImage = async (imageUrl) => {
             if (directPhoto?.owner_id && directPhoto?.id) {
                 const attachment = `photo${directPhoto.owner_id}_${directPhoto.id}${directPhoto.access_key ? '_' + directPhoto.access_key : ''}`;
                 uploadedCampaignPhotos.set(cleanUrl, attachment);
-                return attachment;
+                return { attachment };
             }
         } catch (directErr) {
             console.warn('Direct VK upload failed, fallback to buffer', directErr?.message || directErr);
         }
 
-        const { buffer, contentType } = await fetchImageBuffer(cleanUrl);
+        const fetched = await fetchImageBuffer(cleanUrl);
+        buffer = fetched?.buffer;
+        const contentType = fetched?.contentType || '';
         if (!buffer || buffer.length === 0) throw new Error('Empty image buffer');
 
-        const filename = `campaign.${pickExtension(contentType)}`;
+        filename = `campaign.${pickExtension(contentType)}`;
         const photo = await vk.upload.messagePhoto({ source: { value: buffer, filename } });
 
         if (photo?.owner_id && photo?.id) {
             const attachment = `photo${photo.owner_id}_${photo.id}${photo.access_key ? '_' + photo.access_key : ''}`;
             uploadedCampaignPhotos.set(cleanUrl, attachment);
-            return attachment;
+            return { attachment, buffer, filename };
         }
     } catch (err) {
         console.error('Image upload failed', err);
     }
 
-    return null;
+    return buffer ? { attachment: null, buffer, filename } : null;
 };
 
 const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) => {
@@ -740,7 +745,10 @@ app.post('/api/campaigns/send', async (req, res) => {
     const requestedImage = (imageUrl || image_url || '').trim();
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
-    const photoAttachment = await uploadCampaignImage(requestedImage);
+    const photoResult = await uploadCampaignImage(requestedImage);
+    let photoAttachment = photoResult?.attachment || null;
+    let photoBuffer = photoResult?.buffer;
+    let photoFilename = photoResult?.filename || 'campaign.jpg';
     const voiceResult = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
     let voiceAttachment = voiceResult?.attachment || null;
     let voiceBuffer = voiceResult?.buffer;
@@ -785,6 +793,18 @@ app.post('/api/campaigns/send', async (req, res) => {
             };
 
             const attachments = [];
+            if (!photoAttachment && photoBuffer) {
+                try {
+                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                    if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                        photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                        uploadedCampaignPhotos.set(requestedImage || 'buffer', photoAttachment);
+                    }
+                } catch (peerPhotoErr) {
+                    console.warn('Peer-specific photo upload failed', peerPhotoErr?.message || peerPhotoErr);
+                }
+            }
+
             if (photoAttachment) attachments.push(photoAttachment);
 
             // Если общий голосовой аттачмент отсутствует, но есть подготовленный буфер, пробуем загрузить под конкретный peer_id
