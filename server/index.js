@@ -753,7 +753,22 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
-    const { campaignId, message, type, segment = 'ALL', imageUrl, image_url, imageBase64, imageName, voiceUrl, voice_url, voiceBase64, voiceName, filters = {} } = req.body || {};
+    const {
+        campaignId,
+        message,
+        type,
+        segment = 'ALL',
+        imageUrl,
+        image_url,
+        imageBase64,
+        image_base64: imageBase64Snake,
+        imageName,
+        voiceUrl,
+        voice_url,
+        voiceBase64,
+        voiceName,
+        filters = {},
+    } = req.body || {};
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
@@ -761,7 +776,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
     const requestedImage = (imageUrl || image_url || '').trim();
-    const requestedImageBase64 = (imageBase64 || '').trim();
+    const requestedImageBase64 = (imageBase64 || imageBase64Snake || '').trim();
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
     const photoResult = await uploadCampaignImage({ imageUrl: requestedImage, imageBase64: requestedImageBase64, imageName });
