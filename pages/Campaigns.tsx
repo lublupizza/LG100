@@ -18,6 +18,8 @@ const Campaigns: React.FC = () => {
     segment: 'ALL',
     message: '',
     imageUrl: '',
+    imageData: '',
+    imageName: '',
     voiceUrl: '',
     voiceData: '',
     voiceName: '',
@@ -27,6 +29,24 @@ const Campaigns: React.FC = () => {
     const hydrated = hydrateCampaigns();
     setCampaigns([...hydrated]);
   }, []);
+
+  const handleImageFile = (file?: File | null) => {
+    if (!file) {
+      setNewCampaign({ ...newCampaign, imageData: '', imageName: '', imageUrl: newCampaign.imageUrl });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setNewCampaign({
+        ...newCampaign,
+        imageData: typeof reader.result === 'string' ? reader.result : '',
+        imageUrl: '',
+        imageName: file.name,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleVoiceFile = (file?: File | null) => {
     if (!file) {
@@ -49,7 +69,7 @@ const Campaigns: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedImage = newCampaign.imageUrl.trim();
-    const normalizedImage = trimmedImage || undefined;
+    const normalizedImage = (newCampaign.imageData && newCampaign.imageData.trim()) || trimmedImage || undefined;
     const voiceSource = (newCampaign.voiceData || newCampaign.voiceUrl).trim();
     const normalizedVoice = voiceSource || undefined;
     const camp: Campaign = {
@@ -58,7 +78,9 @@ const Campaigns: React.FC = () => {
         type: newCampaign.type,
         segment_target: newCampaign.segment as UserSegment | 'ALL',
         message: newCampaign.message,
-        image_url: normalizedImage,
+        image_url: newCampaign.imageData ? undefined : (normalizedImage || undefined),
+        image_base64: newCampaign.imageData || undefined,
+        image_name: newCampaign.imageName || undefined,
         // Дублируем для обратной совместимости с разными полями
         ...(normalizedImage ? { imageUrl: normalizedImage } : { imageUrl: undefined } as any),
         voice_url: normalizedVoice,
@@ -72,7 +94,7 @@ const Campaigns: React.FC = () => {
     localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
     setCampaigns([camp, ...campaigns]);
     setIsCreating(false);
-    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', voiceUrl: '', voiceData: '', voiceName: '' });
+    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '' });
   };
 
   const handleLaunch = async (id: string) => {
@@ -207,14 +229,39 @@ const Campaigns: React.FC = () => {
                 <div className="md:col-span-2 space-y-5">
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Картинка (опционально)</label>
-                    <input
-                      type="url"
-                      placeholder="https://...jpg"
-                      value={newCampaign.imageUrl}
-                      onChange={(e) => setNewCampaign({ ...newCampaign, imageUrl: e.target.value })}
-                      className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Вставьте прямую ссылку на изображение, чтобы отправить пуш с картинкой.</p>
+                    <div className="space-y-2">
+                      <input
+                        type="url"
+                        placeholder="https://...jpg"
+                        value={newCampaign.imageUrl}
+                        onChange={(e) => setNewCampaign({ ...newCampaign, imageUrl: e.target.value, imageData: '', imageName: '' })}
+                        className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
+                      />
+                      <div className="flex items-center gap-3">
+                        <label className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm text-sm font-semibold cursor-pointer hover:bg-gray-50">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleImageFile(e.target.files?.[0])}
+                          />
+                          Загрузить файл
+                        </label>
+                        {newCampaign.imageName && (
+                          <span className="text-xs text-gray-600">{newCampaign.imageName}</span>
+                        )}
+                        {(newCampaign.imageData || newCampaign.imageUrl) && (
+                          <button
+                            type="button"
+                            onClick={() => setNewCampaign({ ...newCampaign, imageUrl: '', imageData: '', imageName: '' })}
+                            className="text-xs text-gray-500 hover:text-gray-800"
+                          >
+                            Очистить
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">Вставьте ссылку или загрузите файл, чтобы отправить пуш с картинкой.</p>
+                    </div>
                   </div>
 
                   <div>
@@ -257,8 +304,8 @@ const Campaigns: React.FC = () => {
                   </div>
                 </div>
                 <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg h-full min-h-[120px] flex flex-col items-center justify-center px-3 py-2 text-xs text-gray-500 space-y-2">
-                  {newCampaign.imageUrl ? (
-                    <img src={newCampaign.imageUrl} alt="Превью" className="max-h-28 rounded" />
+                  {newCampaign.imageData || newCampaign.imageUrl ? (
+                    <img src={newCampaign.imageData || newCampaign.imageUrl} alt="Превью" className="max-h-28 rounded" />
                   ) : (
                     <span className="text-center">Превью появится, когда добавите ссылку</span>
                   )}
@@ -365,7 +412,7 @@ const Campaigns: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-4">
         {filteredCampaigns.length > 0 ? filteredCampaigns.map(camp => {
-            const preview = ((camp as any).imageUrl || camp.image_url || '').trim();
+            const preview = ((camp as any).image_base64 || (camp as any).imageUrl || camp.image_url || '').trim();
             const voicePreview = ((camp as any).voice_url || (camp as any).voiceUrl || camp.voice_base64 || '').trim();
             const badge = statusView(camp.status);
             return (

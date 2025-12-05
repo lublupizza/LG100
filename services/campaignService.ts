@@ -31,11 +31,13 @@ export const hydrateCampaigns = (): Campaign[] => {
     const parsed = JSON.parse(stored) as Campaign[];
     if (Array.isArray(parsed)) {
       const normalized = parsed.map((c: any) => {
-        const image = c.image_url || c.imageUrl;
+        const image = c.image_base64 || c.image_url || c.imageUrl;
         const voice = c.voice_url || c.voiceUrl || c.voice_base64;
         return {
           ...c,
-          image_url: image,
+          image_url: c.image_base64 ? undefined : image,
+          image_base64: c.image_base64 || (typeof image === 'string' && image.startsWith('data:') ? image : undefined),
+          image_name: c.image_name,
           // сохраняем дублирующее поле, чтобы старые записи корректно показывали превью
           imageUrl: image,
           voice_url: voice,
@@ -62,14 +64,16 @@ export const launchCampaign = async (
   if (!campaign) return null;
 
   // Нормализуем ссылку на изображение один раз
-  const image = ((campaign as any).imageUrl || campaign.image_url || '').trim();
+  const image = ((campaign as any).image_base64 || (campaign as any).imageUrl || campaign.image_url || '').trim();
   const voiceUrl = ((campaign as any).voice_url || (campaign as any).voiceUrl || '').trim();
   const voiceBase64 = (campaign as any).voice_base64 || '';
 
   // Проставляем нормализованную картинку в объект, чтобы сохранить при обновлении
   const hydratedCampaign: Campaign = {
     ...campaign,
-    image_url: image || undefined,
+    image_url: (campaign as any).image_base64 ? undefined : (image || undefined),
+    image_base64: (campaign as any).image_base64 || (typeof image === 'string' && image.startsWith('data:') ? image : undefined),
+    image_name: (campaign as any).image_name,
     ...(image ? { imageUrl: image } : { imageUrl: undefined } as any),
     voice_url: voiceUrl || voiceBase64 || undefined,
     ...(voiceUrl ? { voiceUrl } : voiceBase64 ? { voiceUrl: undefined } : {} as any),
@@ -106,6 +110,8 @@ export const launchCampaign = async (
           segment: campaign.segment_target,
           imageUrl: image,
           image_url: image,
+          image_base64: (campaign as any).image_base64,
+          imageName: (campaign as any).image_name,
           voiceUrl: voiceUrl,
           voice_url: voiceUrl,
           voiceBase64: voiceBase64,

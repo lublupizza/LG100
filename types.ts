@@ -82,6 +82,8 @@ export interface Campaign {
   segment_target: UserSegment | 'ALL';
   message: string;
   image_url?: string;
+  image_base64?: string;
+  image_name?: string;
   voice_url?: string;
   voice_base64?: string;
   voice_name?: string;
