@@ -315,7 +315,7 @@ const { Blob, FormData } = globalThis;
 const uploadedCampaignPhotos = new Map();
 const uploadedCampaignVoices = new Map();
 
-const parseBase64DataUri = (dataUri = '') => {
+const parseBase64DataUri = (dataUri = '', fallbackContentType = 'application/octet-stream') => {
     const trimmed = dataUri.trim();
     const match = trimmed.match(/^data:([^;]+);base64,(.*)$/);
 
@@ -329,7 +329,7 @@ const parseBase64DataUri = (dataUri = '') => {
                 contentType,
             };
         } catch (err) {
-            console.error('Failed to parse base64 voice', err);
+            console.error('Failed to parse base64 payload', err);
             return null;
         }
     }
@@ -340,10 +340,10 @@ const parseBase64DataUri = (dataUri = '') => {
         if (!clean) return null;
         return {
             buffer: Buffer.from(clean, 'base64'),
-            contentType: 'audio/mpeg',
+            contentType: fallbackContentType,
         };
     } catch (err) {
-        console.error('Failed to parse raw base64 voice', err);
+        console.error('Failed to parse raw base64 payload', err);
         return null;
     }
 };
@@ -629,7 +629,7 @@ const uploadCampaignImage = async ({ imageUrl, imageBase64, imageName } = {}) =>
         }
 
         if (cleanBase64) {
-            const parsed = parseBase64DataUri(cleanBase64);
+            const parsed = parseBase64DataUri(cleanBase64, 'image/jpeg');
             buffer = parsed?.buffer;
             contentType = parsed?.contentType || '';
         }
@@ -694,7 +694,7 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
 
         // 2) Собираем буфер из base64 или качаем файл
         if (cleanBase64) {
-            const parsed = parseBase64DataUri(cleanBase64) || { buffer: null, contentType: null };
+            const parsed = parseBase64DataUri(cleanBase64, 'audio/mpeg') || { buffer: null, contentType: null };
             buffer = parsed.buffer;
             contentType = parsed.contentType || contentType;
         } else if (cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
@@ -795,7 +795,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     if ((requestedVoice || voiceBase64) && !voiceAttachment && !voiceBuffer) {
         try {
             if (voiceBase64) {
-                const parsed = parseBase64DataUri(voiceBase64);
+                const parsed = parseBase64DataUri(voiceBase64, 'audio/mpeg');
                 voiceBuffer = parsed?.buffer;
                 voiceFilename = parsed?.filename || voiceFilename || voiceName || 'voice.ogg';
             } else if (requestedVoice && (requestedVoice.startsWith('http://') || requestedVoice.startsWith('https://'))) {
