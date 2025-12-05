@@ -27,7 +27,7 @@ const prisma = new PrismaClient();
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // === ГРАФИКА ===
