@@ -498,9 +498,15 @@ const pickExtension = (contentType = '', fallback = 'jpg') => {
 const uploadAudioMessageViaDocs = async ({ buffer, filename, contentType, peerId }) => {
     if (!buffer || buffer.length === 0) return null;
 
+    // Для сообществ VK требует peer_id при загрузке аудиосообщения через docs
+    if (!peerId) {
+        console.warn('Skipping docs audio_message upload because peerId is missing');
+        return null;
+    }
+
     const safeFilename = filename || 'voice.ogg';
     try {
-        const uploadServer = await vk.api.docs.getMessagesUploadServer({ type: 'audio_message', ...(peerId ? { peer_id: peerId } : {}) });
+        const uploadServer = await vk.api.docs.getMessagesUploadServer({ type: 'audio_message', peer_id: peerId });
         if (!uploadServer?.upload_url) throw new Error('Missing upload url for audio_message');
 
         if (typeof fetch !== 'function' || typeof FormData === 'undefined' || typeof Blob === 'undefined') {
@@ -790,6 +796,31 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     if (requestedImage && !photoAttachment) {
         console.warn('Campaign send without photo attachment despite image URL', { campaignId, requestedImage });
+    }
+
+    // Если ни одно вложение не подготовилось, пробуем распарсить base64 повторно или скачать URL
+    if (!photoAttachment && !photoBuffer && requestedImageBase64) {
+        try {
+            const parsedImage = parseBase64DataUri(requestedImageBase64, 'image/jpeg');
+            if (parsedImage?.buffer) {
+                photoBuffer = parsedImage.buffer;
+                photoFilename = imageName || `campaign.${pickExtension(parsedImage.contentType || 'image/jpeg')}`;
+            }
+        } catch (imgParseErr) {
+            console.warn('Failed to recover image from base64', imgParseErr?.message || imgParseErr);
+        }
+    }
+
+    if (!photoAttachment && !photoBuffer && requestedImage && (requestedImage.startsWith('http://') || requestedImage.startsWith('https://'))) {
+        try {
+            const fetched = await fetchImageBuffer(requestedImage);
+            if (fetched?.buffer) {
+                photoBuffer = fetched.buffer;
+                photoFilename = `image.${pickExtension(fetched.contentType)}`;
+            }
+        } catch (imgFetchErr) {
+            console.warn('Failed to recover image from URL', imgFetchErr?.message || imgFetchErr);
+        }
     }
 
     if ((requestedVoice || voiceBase64) && !voiceAttachment && !voiceBuffer) {
