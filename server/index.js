@@ -604,8 +604,9 @@ const ensureOpusAudio = async ({ buffer, contentType, filename }) => {
 const uploadCampaignImage = async ({ imageUrl, imageBase64, imageName } = {}) => {
     const cleanUrl = (imageUrl || '').trim();
     const cleanBase64 = (imageBase64 || '').trim();
-    const cacheKey = cleanBase64 ? `data:${cleanBase64.length}:${cleanBase64.slice(0, 32)}` : cleanUrl;
+    const cacheKey = cleanUrl ? cleanUrl : null;
 
+    // Вернём кэш, только если это загрузка по URL
     if (cacheKey && uploadedCampaignPhotos.has(cacheKey)) {
         return { attachment: uploadedCampaignPhotos.get(cacheKey) };
     }
@@ -615,6 +616,19 @@ const uploadCampaignImage = async ({ imageUrl, imageBase64, imageName } = {}) =>
     let contentType = '';
 
     try {
+        // 1. Файл, загруженный с компьютера (base64) — не загружаем глобально, чтобы fallback в цикле
+        if (cleanBase64) {
+            const parsed = parseBase64DataUri(cleanBase64, 'image/jpeg');
+            if (parsed?.buffer) {
+                return {
+                    attachment: null,
+                    buffer: parsed.buffer,
+                    filename,
+                };
+            }
+        }
+
+        // 2. Попытка загрузить URL напрямую через VK
         if (cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
             try {
                 const directPhoto = await vk.upload.messagePhoto({ source: { url: cleanUrl } });
@@ -624,42 +638,27 @@ const uploadCampaignImage = async ({ imageUrl, imageBase64, imageName } = {}) =>
                     return { attachment };
                 }
             } catch (directErr) {
-                console.warn('Direct VK upload failed, fallback to buffer', directErr?.message || directErr);
+                console.warn('Direct VK URL upload failed, trying buffer download...');
             }
-        }
 
-        if (cleanBase64) {
-            const parsed = parseBase64DataUri(cleanBase64, 'image/jpeg');
-            buffer = parsed?.buffer;
-            contentType = parsed?.contentType || '';
-        }
-
-        if (!buffer && cleanUrl) {
+            // 3. Скачиваем и отдаём буфер, чтобы загрузить с peer_id внутри цикла отправки
             const fetched = await fetchImageBuffer(cleanUrl);
             buffer = fetched?.buffer;
             contentType = fetched?.contentType || '';
-        }
 
-        if (!buffer || buffer.length === 0) throw new Error('Empty image buffer');
-
-        if (!filename.includes('.')) {
-            filename = `${filename}.${pickExtension(contentType)}`;
-        } else if (!imageName) {
-            filename = `campaign.${pickExtension(contentType)}`;
-        }
-
-        const photo = await vk.upload.messagePhoto({ source: { value: buffer, filename } });
-
-        if (photo?.owner_id && photo?.id) {
-            const attachment = `photo${photo.owner_id}_${photo.id}${photo.access_key ? '_' + photo.access_key : ''}`;
-            uploadedCampaignPhotos.set(cacheKey, attachment);
-            return { attachment, buffer, filename };
+            if (buffer) {
+                return {
+                    attachment: null,
+                    buffer,
+                    filename: `image.${pickExtension(contentType)}`,
+                };
+            }
         }
     } catch (err) {
-        console.error('Image upload failed', err);
+        console.error('Image processing failed:', err.message || err);
     }
 
-    return buffer ? { attachment: null, buffer, filename } : null;
+    return null;
 };
 
 const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) => {
