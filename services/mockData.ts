@@ -167,17 +167,6 @@ export const mockGames: GameSession[] = [
 
 export const mockCampaigns: Campaign[] = [
   {
-    id: 'c1',
-    name: 'Зимняя распродажа - Теплые',
-    type: CampaignType.STANDARD,
-    segment_target: UserSegment.WARM,
-    message: 'Скидка 20% на все товары только сегодня!',
-    status: 'SENT',
-    stats: { sent: 1500, delivered: 1450, clicked: 320 },
-    created_at: '2025-11-30',
-    target_post_id: 4512 // Для трекинга лайков к этому посту
-  },
-  {
     id: 'c2',
     name: 'Возврат холодных (Морской бой)',
     type: CampaignType.GAME_BATTLESHIP,
