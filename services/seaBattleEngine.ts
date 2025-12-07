@@ -1,7 +1,10 @@
 
 import { CellState, GameSession, GameType, GameChannel, GameStatus, EventType, User } from '../types';
 import { registerEvent } from './ltvEngine';
-import { mockGames, mockUsers } from './mockData';
+
+// Хранилище игровых сессий (вместо моковых данных из файлов)
+const mockGames: any[] = [];
+const mockUsers: User[] = [];
 
 // === 1. ЯДРО ИГРЫ (Logic) ===
 
