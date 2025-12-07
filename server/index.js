@@ -203,6 +203,29 @@ function parseCoords(text) {
     return (x >= 0 && y >= 0 && y < 10) ? {x, y} : null;
 }
 
+const updateSubscriptionStatus = async (user, isSubscribed) => {
+    if (!user?.id || typeof isSubscribed !== 'boolean') return user;
+
+    // Avoid unnecessary writes when nothing changes
+    if (user.isSubscribed === isSubscribed && (isSubscribed || user.unsubscribedAt == null)) {
+        return user;
+    }
+
+    try {
+        const updated = await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                isSubscribed,
+                unsubscribedAt: isSubscribed ? null : new Date(),
+            },
+        });
+        return updated;
+    } catch (err) {
+        console.error('Failed to update subscription status', err);
+        return user;
+    }
+};
+
 // === БОТ ===
 const buildMainMenuKeyboard = (includeStart = false) => {
     const keyboard = Keyboard.builder()
@@ -236,9 +259,9 @@ vk.updates.on('message_new', async (ctx) => {
     if (!user) {
         try {
             const [info] = await vk.api.users.get({ user_ids: ctx.senderId });
-            user = await prisma.user.create({ data: { vkId: ctx.senderId, firstName: info?.first_name, lastName: info?.last_name } });
+            user = await prisma.user.create({ data: { vkId: ctx.senderId, firstName: info?.first_name, lastName: info?.last_name, isSubscribed: true } });
         } catch(e) {
-            user = await prisma.user.create({ data: { vkId: ctx.senderId } });
+            user = await prisma.user.create({ data: { vkId: ctx.senderId, isSubscribed: true } });
         }
     }
 
@@ -263,6 +286,7 @@ vk.updates.on('message_new', async (ctx) => {
 
     // Кнопки меню
     if (normalizedText === 'меню') {
+        user = await updateSubscriptionStatus(user, true);
         return ctx.send({ message: '📋 Главное меню. Выберите действие:', keyboard: buildMainMenuKeyboard() });
     }
 
@@ -279,6 +303,7 @@ vk.updates.on('message_new', async (ctx) => {
     }
 
     if (normalizedText === 'отписка') {
+        user = await updateSubscriptionStatus(user, false);
         return ctx.send({ message: 'Вы отписались от рассылки. Если захотите вернуться — напишите "Меню".', keyboard: buildMainMenuKeyboard() });
     }
 
@@ -292,6 +317,7 @@ vk.updates.on('message_new', async (ctx) => {
     const game = await prisma.game.findFirst({ where: { userId: user.id, status: 'ACTIVE' } });
 
     if (normalizedText === 'старт') {
+        user = await updateSubscriptionStatus(user, true);
         if (game) await prisma.game.update({ where: { id: game.id }, data: { status: 'FINISHED' } });
         const board = SeaBattleGame.generateBoard();
         await prisma.game.create({ data: { userId: user.id, board: JSON.stringify(board) } });
@@ -375,12 +401,14 @@ const loadRecipients = async () => {
     const users = await prisma.user.findMany({ include: { games: true } });
 
     if (users.length > 0) {
-        return users.map((u) => ({
+        return users
+            .filter((u) => u.isSubscribed !== false)
+            .map((u) => ({
             vkId: u.vkId,
             // Минимальная информация для фильтров
             games_played: (u.games || []).length,
-            // Пока нет поля в БД — считаем подписчиком, чтобы не отсечь аудиторию
-            is_member: true,
+            is_member: u.isSubscribed !== false,
+            unsubscribed_at: u.unsubscribedAt,
             segment: 'ALL',
         }));
     }
