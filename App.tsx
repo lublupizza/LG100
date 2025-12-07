@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
-import Campaigns from './pages/Campaigns';
+import Campaigns from './pages/campaigns';
 import Games from './pages/Games';
 import Settings from './pages/Settings';
 
