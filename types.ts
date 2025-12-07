@@ -81,6 +81,12 @@ export interface Campaign {
   type: CampaignType;
   segment_target: UserSegment | 'ALL';
   message: string;
+  image_url?: string;
+  image_base64?: string;
+  image_name?: string;
+  voice_url?: string;
+  voice_base64?: string;
+  voice_name?: string;
   status: 'DRAFT' | 'SENT' | 'SCHEDULED';
   target_post_id?: number;
   stats: CampaignStats;
@@ -157,6 +163,19 @@ export interface CampaignFunnelStats extends CampaignReactionStats {
     warm_hot_count: number;
     warm_hot_rate: number;
     warm_hot_from_acted: number;
+}
+
+export interface CampaignSend {
+  id: string;
+  campaign_id: string;
+  user_id?: number;
+  user_vk_id?: number;
+  segment?: UserSegment | 'ALL';
+  vk_message_id?: number;
+  sent_at: string;
+  viewed_at?: string;
+  first_action_at?: string;
+  first_action_type?: EventType | string;
 }
 
 export interface EventMetadata {
