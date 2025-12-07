@@ -1,8 +1,10 @@
 
 import { EventType } from '../types';
 import { registerEvent } from './ltvEngine';
-import { mockUsers } from './mockData';
 import { SeaBattleSessionManager } from './seaBattleEngine';
+
+// Временное хранилище пользователей вместо моковых данных
+const mockUsers: any[] = [];
 
 // === BACKEND SIMULATION ===
 interface VkEvent {

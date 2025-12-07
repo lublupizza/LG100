@@ -137,6 +137,8 @@ export interface User {
   last_active: string;
   source: string;
   games?: any[];
+  is_subscribed?: boolean;
+  unsubscribed_at?: string | null;
 }
 
 export interface UserHistoryItem {
