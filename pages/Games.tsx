@@ -1,53 +1,82 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { GameSession, GameStatus, GameChannel, CellState, GameType, User, TimePeriod } from '../types';
 import { Gamepad2, X, Eye, Filter, Clock, Calendar } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
+import { fetchGames, fetchGameByUser } from '../services/seaBattleEngine';
 
 interface GamesProps {
   users: User[];
+  reloadUsers?: () => void;
 }
 
 const Games: React.FC<GamesProps> = ({ users }) => {
   const [selectedGame, setSelectedGame] = useState<GameSession | null>(null);
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'FINISHED'>('ACTIVE');
   const [filterPeriod, setFilterPeriod] = useState<TimePeriod>('ALL');
+  const [games, setGames] = useState<GameSession[]>([]);
+
+  useEffect(() => {
+    loadGames();
+  }, []);
+
+  const loadGames = async () => {
+    const apiGames = await fetchGames();
+    const usersById = new Map(users.map((u) => [u.id, u]));
+
+    const normalized = apiGames.map((g: any) => {
+      let board: CellState[][] | undefined;
+      if (typeof g.board === 'string') {
+        try { board = JSON.parse(g.board); } catch (e) { board = undefined; }
+      } else {
+        board = g.board;
+      }
+      const user = usersById.get(g.user_id || g.userId);
+      return {
+        ...g,
+        id: g.id,
+        user_id: g.user_id || g.userId,
+        user_name: user ? `${user.first_name} ${user.last_name}` : g.user_name || `User ${g.user_id || g.userId}`,
+        type: g.type || GameType.BATTLESHIP,
+        channel: g.channel || GameChannel.DM,
+        status: g.status as GameStatus,
+        started_at: g.started_at || g.createdAt,
+        updated_at: g.updated_at || g.updatedAt || g.createdAt,
+        moves_count: g.moves_count || g.moves || 0,
+        state_summary: g.state_summary || (g.status === 'ACTIVE' ? 'Идет бой' : 'Завершено'),
+        board,
+      } as GameSession;
+    });
+
+    setGames(normalized);
+  };
 
   const realGames: GameSession[] = useMemo(() => {
-    const list: GameSession[] = [];
-    users.forEach(user => {
-      if (user.games && user.games.length > 0) {
-        user.games.forEach((dbGame: any) => {
-          let parsedBoard = [];
-          try { parsedBoard = JSON.parse(dbGame.board); } catch (e) {}
-          list.push({
-            id: dbGame.id,
-            user_id: user.id,
-            user_name: user.first_name ? `${user.first_name} ${user.last_name}` : `User ${user.vk_id}`,
-            type: GameType.BATTLESHIP,
-            channel: GameChannel.DM,
-            status: dbGame.status as GameStatus,
-            started_at: dbGame.createdAt,
-            updated_at: dbGame.updatedAt || dbGame.createdAt,
-            moves_count: dbGame.moves || 0,
-            state_summary: dbGame.status === 'ACTIVE' ? 'Идет бой' : 'Завершено',
-            board: parsedBoard
-          });
-        });
-      }
-    });
-    const filtered = list.filter(game => {
-        if (filterStatus !== 'ALL' && game.status !== filterStatus) return false;
-        if (!isDateInPeriod(game.updated_at, filterPeriod)) return false;
-        return true;
+    const filtered = games.filter((game) => {
+      if (filterStatus !== 'ALL' && game.status !== filterStatus) return false;
+      if (!isDateInPeriod(game.updated_at, filterPeriod)) return false;
+      return true;
     });
     return filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  }, [users, filterStatus, filterPeriod]);
+  }, [games, filterStatus, filterPeriod]);
 
   const letters = 'АБВГДЕЖЗИК'.split('');
 
+  const handleOpenGame = async (game: GameSession) => {
+    if (!game.board) {
+      const latest = await fetchGameByUser(game.user_id);
+      if (latest?.board) {
+        let board = latest.board as any;
+        if (typeof board === 'string') {
+          try { board = JSON.parse(board); } catch (e) {}
+        }
+        game = { ...game, board };
+      }
+    }
+    setSelectedGame(game);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* ЗАГОЛОВОК И ФИЛЬТРЫ */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
         <div>
             <h3 className="text-xl font-bold flex items-center gap-2 text-gray-900">
@@ -59,7 +88,7 @@ const Games: React.FC<GamesProps> = ({ users }) => {
         <div className="flex flex-wrap gap-3">
            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
                <Filter size={16} className="text-gray-400" />
-               <select 
+               <select
                   value={filterStatus}
                   onChange={(e) => setFilterStatus(e.target.value as any)}
                   className="bg-transparent text-sm font-medium text-gray-700 focus:outline-none cursor-pointer"
@@ -71,7 +100,7 @@ const Games: React.FC<GamesProps> = ({ users }) => {
            </div>
            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
                <Clock size={16} className="text-gray-400" />
-               <select 
+               <select
                   value={filterPeriod}
                   onChange={(e) => setFilterPeriod(e.target.value as any)}
                   className="bg-transparent text-sm font-medium text-gray-700 focus:outline-none cursor-pointer"
@@ -85,7 +114,6 @@ const Games: React.FC<GamesProps> = ({ users }) => {
         </div>
       </div>
 
-      {/* СПИСОК ИГР */}
       {realGames.length === 0 ? (
           <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed flex flex-col items-center">
               <Gamepad2 size={48} className="opacity-20 mb-4" />
@@ -94,7 +122,7 @@ const Games: React.FC<GamesProps> = ({ users }) => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {realGames.map((game) => (
-            <div key={game.id} onClick={() => setSelectedGame(game)} className="bg-white rounded-xl border border-gray-200 p-5 relative overflow-hidden group shadow-sm hover:shadow-md transition-all cursor-pointer hover:border-pizza-red">
+            <div key={game.id} onClick={() => handleOpenGame(game)} className="bg-white rounded-xl border border-gray-200 p-5 relative overflow-hidden group shadow-sm hover:shadow-md transition-all cursor-pointer hover:border-pizza-red">
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex items-center gap-2">
                       <span className={`w-2.5 h-2.5 rounded-full ${game.status === 'ACTIVE' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></span>
@@ -107,7 +135,7 @@ const Games: React.FC<GamesProps> = ({ users }) => {
                 <div className="space-y-1 mb-4 border-b border-gray-100 pb-3">
                   <div className="text-sm text-gray-500">Игрок: <span className="text-gray-900 font-medium">{game.user_name}</span></div>
                   <div className="text-xs text-gray-400 flex items-center gap-1 mt-1">
-                      <Calendar size={10} /> 
+                      <Calendar size={10} />
                       {new Date(game.updated_at).toLocaleString('ru-RU')}
                   </div>
                 </div>
@@ -122,7 +150,6 @@ const Games: React.FC<GamesProps> = ({ users }) => {
         </div>
       )}
 
-      {/* МОДАЛКА С ПОЛЕМ (ЭМОДЗИ ВЕРСИЯ) */}
       {selectedGame && selectedGame.board && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]">
@@ -137,7 +164,7 @@ const Games: React.FC<GamesProps> = ({ users }) => {
                  <X size={20} />
                </button>
             </div>
-            
+
             <div className="p-6 flex justify-center bg-white overflow-y-auto">
                <div className="inline-block bg-gray-50 p-3 rounded-xl border border-gray-200 select-none">
                   <table className="border-collapse">
@@ -155,11 +182,11 @@ const Games: React.FC<GamesProps> = ({ users }) => {
                           <td className="w-8 h-8 text-xs font-bold text-gray-500 text-center align-middle">{y + 1}</td>
                           {row.map((cell, x) => (
                             <td key={x} className="p-0.5">
-                              <div 
+                              <div
                                 className={`
                                   w-7 h-7 flex items-center justify-center rounded text-base leading-none transition-all relative
-                                  ${cell === 0 ? 'bg-white border border-gray-200' : ''} 
-                                  ${cell === 1 ? 'bg-blue-600 border border-blue-700 shadow-sm' : ''} 
+                                  ${cell === 0 ? 'bg-white border border-gray-200' : ''}
+                                  ${cell === 1 ? 'bg-blue-600 border border-blue-700 shadow-sm' : ''}
                                   ${cell === 2 ? 'bg-gray-200 text-gray-400 text-xs font-bold' : ''}
                                   ${cell === 3 ? 'bg-red-100 border-red-300' : ''}
                                   ${cell === 4 ? 'bg-gray-700 border-gray-800' : ''}
@@ -167,7 +194,6 @@ const Games: React.FC<GamesProps> = ({ users }) => {
                                 title={`Координата: ${letters[x]}${y+1}`}
                               >
                                  {cell === 2 && '•'}
-                                 {/* ЭМОДЗИ ВМЕСТО КРЕСТОВ */}
                                  {cell === 3 && '🔥'}
                                  {cell === 4 && '☠️'}
                               </div>
@@ -179,8 +205,7 @@ const Games: React.FC<GamesProps> = ({ users }) => {
                   </table>
                </div>
             </div>
-            
-            {/* Оновленная легенда */}
+
             <div className="p-4 bg-gray-50 text-xs text-gray-600 flex justify-center gap-4 flex-wrap">
                 <span className="flex items-center gap-1"><div className="w-3 h-3 bg-blue-600 rounded"></div> Корабль</span>
                 <span className="flex items-center gap-1">🔥 Попадание</span>
