@@ -148,8 +148,20 @@ class SeaBattleGame {
     return cells;
   }
 
+  static isInsideBoard(board, x, y) {
+    return Array.isArray(board)
+      && y >= 0
+      && y < board.length
+      && Array.isArray(board[y])
+      && x >= 0
+      && x < board[y].length;
+  }
+
   // Полная логика выстрела
   static processShot(board, x, y) {
+    if (!SeaBattleGame.isInsideBoard(board, x, y)) {
+        return { res: 'Некорректные координаты.', win: false };
+    }
     const cell = board[y][x];
     if (cell === CellState.MISS || cell === CellState.HIT || cell === CellState.KILLED) return { res: 'Сюда уже стреляли!', win: false };
     if (cell === CellState.EMPTY) { board[y][x] = CellState.MISS; return { res: 'Мимо!', win: false }; }
@@ -192,9 +204,30 @@ function parseCoords(text) {
 }
 
 // === БОТ ===
+const buildMainMenuKeyboard = (includeStart = false) => {
+    const keyboard = Keyboard.builder()
+        .textButton({ label: 'Меню', color: 'primary' })
+        .textButton({ label: 'Акции', color: 'primary' })
+        .row()
+        .textButton({ label: 'Время и зона доставки', color: 'secondary' })
+        .textButton({ label: 'Вызывать оператора', color: 'secondary' })
+        .row()
+        .textButton({ label: 'Игры', color: 'positive' })
+        .textButton({ label: 'Отписка', color: 'negative' });
+
+    if (includeStart) {
+        keyboard.row().textButton({ label: 'Старт', color: 'positive' });
+    }
+
+    return keyboard.oneTime(false);
+};
+
+const buildStartKeyboard = () => buildMainMenuKeyboard(true);
+
 vk.updates.on('message_new', async (ctx) => {
     if (!ctx.text) return;
     const text = ctx.text;
+    const normalizedText = text.trim().toLowerCase();
     
     let user = await prisma.user.findUnique({ where: { vkId: ctx.senderId } });
     if (!user) {
@@ -225,9 +258,37 @@ vk.updates.on('message_new', async (ctx) => {
         });
     }
 
+    // Кнопки меню
+    if (normalizedText === 'меню') {
+        return ctx.send({ message: '📋 Главное меню. Выберите действие:', keyboard: buildMainMenuKeyboard() });
+    }
+
+    if (normalizedText === 'акции') {
+        return ctx.send({ message: '🎁 Сейчас нет активных акций. Загляните позже!', keyboard: buildMainMenuKeyboard() });
+    }
+
+    if (normalizedText === 'время и зона доставки') {
+        return ctx.send({ message: '🕑 Время и зона доставки: ежедневно с 10:00 до 22:00 в пределах города.', keyboard: buildMainMenuKeyboard() });
+    }
+
+    if (normalizedText === 'вызывать оператора') {
+        return ctx.send({ message: '☎️ Оператор скоро свяжется с вами. Напишите ваш вопрос.', keyboard: buildMainMenuKeyboard() });
+    }
+
+    if (normalizedText === 'отписка') {
+        return ctx.send({ message: 'Вы отписались от рассылки. Если захотите вернуться — напишите "Меню".', keyboard: buildMainMenuKeyboard() });
+    }
+
+    if (normalizedText === 'игры') {
+        return ctx.send({
+            message: '🎮 Доступна игра "Морской бой". Нажмите "Старт", чтобы начать новую партию.',
+            keyboard: buildStartKeyboard(),
+        });
+    }
+
     const game = await prisma.game.findFirst({ where: { userId: user.id, status: 'ACTIVE' } });
 
-    if (text.toLowerCase() === 'старт') {
+    if (normalizedText === 'старт') {
         if (game) await prisma.game.update({ where: { id: game.id }, data: { status: 'FINISHED' } });
         const board = SeaBattleGame.generateBoard();
         await prisma.game.create({ data: { userId: user.id, board: JSON.stringify(board) } });
@@ -236,10 +297,10 @@ vk.updates.on('message_new', async (ctx) => {
             keyboard: Keyboard.builder().textButton({ label: 'Сдаться', color: 'negative' }).inline()
         });
     }
-    
-    if (text.toLowerCase() === 'сдаться' && game) {
+
+    if (normalizedText === 'сдаться' && game) {
         await prisma.game.update({ where: { id: game.id }, data: { status: 'FINISHED' } });
-        return ctx.send({ 
+        return ctx.send({
             message: '🏳️ Вы сдались.',
             keyboard: Keyboard.builder().textButton({ label: 'Старт', color: 'positive' }).oneTime()
         });
@@ -272,11 +333,37 @@ vk.updates.on('message_new', async (ctx) => {
 
     await ctx.send({
         message: 'Напиши "Старт"!',
-        keyboard: Keyboard.builder().textButton({ label: 'Старт', color: 'positive' }).oneTime()
+        keyboard: buildStartKeyboard()
     });
 });
 
 app.get('/api/users', async (req, res) => res.json(await prisma.user.findMany({ include: { games: true } })));
+app.get('/api/games/active/:vkId', async (req, res) => {
+    const vkId = Number(req.params.vkId);
+
+    if (!Number.isFinite(vkId)) {
+        return res.status(400).json({ error: 'Invalid vkId' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { vkId } });
+    if (!user) return res.status(404).json({});
+
+    const game = await prisma.game.findFirst({
+        where: { userId: user.id, status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+    });
+
+    if (!game) return res.status(404).json({});
+
+    let parsedBoard = null;
+    try {
+        parsedBoard = JSON.parse(game.board);
+    } catch (err) {
+        console.error('Failed to parse board JSON', err);
+    }
+
+    return res.json({ ...game, board: parsedBoard });
+});
 app.get('/api/dashboard', (req, res) => res.json({ kpi: {}, charts: {}, lists: {} }));
 
 // === Рассылки ===
