@@ -206,6 +206,8 @@ function parseCoords(text) {
 // === БОТ ===
 const buildMainMenuKeyboard = (includeStart = false) => {
     const keyboard = Keyboard.builder()
+        .inline(false)
+        .oneTime(false)
         .textButton({ label: 'Меню', color: 'primary' })
         .textButton({ label: 'Акции', color: 'primary' })
         .row()
@@ -219,7 +221,7 @@ const buildMainMenuKeyboard = (includeStart = false) => {
         keyboard.row().textButton({ label: 'Старт', color: 'positive' });
     }
 
-    return keyboard.oneTime(false);
+    return keyboard.toJSON();
 };
 
 const buildStartKeyboard = () => buildMainMenuKeyboard(true);
