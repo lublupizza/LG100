@@ -148,8 +148,20 @@ class SeaBattleGame {
     return cells;
   }
 
+  static isInsideBoard(board, x, y) {
+    return Array.isArray(board)
+      && y >= 0
+      && y < board.length
+      && Array.isArray(board[y])
+      && x >= 0
+      && x < board[y].length;
+  }
+
   // Полная логика выстрела
   static processShot(board, x, y) {
+    if (!SeaBattleGame.isInsideBoard(board, x, y)) {
+        return { res: 'Некорректные координаты.', win: false };
+    }
     const cell = board[y][x];
     if (cell === CellState.MISS || cell === CellState.HIT || cell === CellState.KILLED) return { res: 'Сюда уже стреляли!', win: false };
     if (cell === CellState.EMPTY) { board[y][x] = CellState.MISS; return { res: 'Мимо!', win: false }; }
@@ -277,6 +289,32 @@ vk.updates.on('message_new', async (ctx) => {
 });
 
 app.get('/api/users', async (req, res) => res.json(await prisma.user.findMany({ include: { games: true } })));
+app.get('/api/games/active/:vkId', async (req, res) => {
+    const vkId = Number(req.params.vkId);
+
+    if (!Number.isFinite(vkId)) {
+        return res.status(400).json({ error: 'Invalid vkId' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { vkId } });
+    if (!user) return res.status(404).json({});
+
+    const game = await prisma.game.findFirst({
+        where: { userId: user.id, status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+    });
+
+    if (!game) return res.status(404).json({});
+
+    let parsedBoard = null;
+    try {
+        parsedBoard = JSON.parse(game.board);
+    } catch (err) {
+        console.error('Failed to parse board JSON', err);
+    }
+
+    return res.json({ ...game, board: parsedBoard });
+});
 app.get('/api/dashboard', (req, res) => res.json({ kpi: {}, charts: {}, lists: {} }));
 
 // === Рассылки ===
