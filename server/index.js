@@ -221,7 +221,8 @@ const buildMainMenuKeyboard = (includeStart = false) => {
         keyboard.row().textButton({ label: 'Старт', color: 'positive' });
     }
 
-    return keyboard.toJSON();
+    // Используем строковое представление, чтобы VK гарантированно отобразил все кнопки
+    return keyboard.toString();
 };
 
 const buildStartKeyboard = () => buildMainMenuKeyboard(true);
