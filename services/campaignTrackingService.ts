@@ -1,7 +1,10 @@
 
 import { CampaignSend, Campaign, EventType, CampaignReactionStats, TimePeriod, CampaignFunnelStats, UserSegment } from '../types';
-import { mockCampaigns, mockUsers } from './mockData';
 import { isDateInPeriod } from '../utils/dateHelpers';
+
+// Временные хранилища вместо моковых данных из файлов
+const mockCampaigns: Campaign[] = [];
+const mockUsers: any[] = [];
 
 // Мок-база отправок (в реале - таблица SQL campaign_sends)
 export const mockCampaignSends: CampaignSend[] = [];

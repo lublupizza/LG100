@@ -1,14 +1,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { Campaign, UserSegment, CampaignType, TimePeriod } from '../types';
-import { mockCampaigns } from '../services/mockData';
 import { hydrateCampaigns, launchCampaign, recalculateGameStats } from '../services/campaignService';
 import { getCampaignFunnelForPeriod } from '../services/campaignTrackingService';
 import { Send, Plus, Calendar, Gamepad2, Play, Clock, Eye, Activity, Flame, ChevronRight } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
 
 const Campaigns: React.FC = () => {
-  const [campaigns, setCampaigns] = useState<Campaign[]>(mockCampaigns);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [period, setPeriod] = useState<TimePeriod>('7d');
   
   const [isCreating, setIsCreating] = useState(false);
@@ -26,8 +25,10 @@ const Campaigns: React.FC = () => {
   });
 
   useEffect(() => {
-    const hydrated = hydrateCampaigns();
-    setCampaigns([...hydrated]);
+    (async () => {
+      const hydrated = await hydrateCampaigns();
+      setCampaigns([...hydrated]);
+    })();
   }, []);
 
   const handleImageFile = (file?: File | null) => {
@@ -90,8 +91,6 @@ const Campaigns: React.FC = () => {
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
     };
-    mockCampaigns.unshift(camp);
-    localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
     setCampaigns([camp, ...campaigns]);
     setIsCreating(false);
     setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '' });
@@ -108,10 +107,8 @@ const Campaigns: React.FC = () => {
         if (updatedCampaign) {
             setCampaigns(prev => prev.map(c => c.id === id ? updatedCampaign : c));
         }
-        // Всегда синхронизируем с локальным хранилищем после запуска, чтобы статусы не зависали в "АКТИВНА"
-        const hydrated = hydrateCampaigns();
+        const hydrated = await hydrateCampaigns();
         setCampaigns([...hydrated]);
-        localStorage.setItem('campaigns', JSON.stringify(mockCampaigns));
     }
   };
 
