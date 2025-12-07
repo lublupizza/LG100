@@ -1,47 +1,69 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { GameSession, GameStatus, GameChannel, CellState, GameType, User, TimePeriod } from '../types';
 import { Gamepad2, X, Eye, Filter, Clock, Calendar } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
+import { getGameStatus } from '../services/seaBattleEngine';
 
 interface GamesProps {
   users: User[];
 }
 
 const Games: React.FC<GamesProps> = ({ users }) => {
+  const [games, setGames] = useState<GameSession[]>([]);
   const [selectedGame, setSelectedGame] = useState<GameSession | null>(null);
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'FINISHED'>('ACTIVE');
   const [filterPeriod, setFilterPeriod] = useState<TimePeriod>('ALL');
 
-  const realGames: GameSession[] = useMemo(() => {
-    const list: GameSession[] = [];
-    users.forEach(user => {
-      if (user.games && user.games.length > 0) {
-        user.games.forEach((dbGame: any) => {
-          let parsedBoard = [];
-          try { parsedBoard = JSON.parse(dbGame.board); } catch (e) {}
-          list.push({
-            id: dbGame.id,
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadBoards = async () => {
+      const loaded: GameSession[] = [];
+
+      for (const user of users) {
+        try {
+          const game = await getGameStatus(user.vk_id);
+
+          if (!game || !game.board) continue;
+
+          loaded.push({
+            id: game.id ?? `game_${user.vk_id}`,
             user_id: user.id,
             user_name: user.first_name ? `${user.first_name} ${user.last_name}` : `User ${user.vk_id}`,
             type: GameType.BATTLESHIP,
             channel: GameChannel.DM,
-            status: dbGame.status as GameStatus,
-            started_at: dbGame.createdAt,
-            updated_at: dbGame.updatedAt || dbGame.createdAt,
-            moves_count: dbGame.moves || 0,
-            state_summary: dbGame.status === 'ACTIVE' ? 'Идет бой' : 'Завершено',
-            board: parsedBoard
+            status: (game.status as GameStatus) || GameStatus.ACTIVE,
+            started_at: game.createdAt || new Date().toISOString(),
+            updated_at: game.updatedAt || game.createdAt || new Date().toISOString(),
+            moves_count: game.moves || 0,
+            state_summary: game.status === 'FINISHED' ? 'Игра завершена' : 'Идет бой',
+            board: Array.isArray(game.board) ? (game.board as CellState[][]) : [],
           });
-        });
+        } catch (err) {
+          console.warn('Failed to load game for user', user.vk_id, err);
+        }
       }
-    });
-    const filtered = list.filter(game => {
+
+      if (!cancelled) {
+        setGames(loaded);
+      }
+    };
+
+    loadBoards();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [users]);
+
+  const realGames: GameSession[] = useMemo(() => {
+    const filtered = games.filter(game => {
         if (filterStatus !== 'ALL' && game.status !== filterStatus) return false;
         if (!isDateInPeriod(game.updated_at, filterPeriod)) return false;
         return true;
     });
     return filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  }, [users, filterStatus, filterPeriod]);
+  }, [games, filterStatus, filterPeriod]);
 
   const letters = 'АБВГДЕЖЗИК'.split('');
 
