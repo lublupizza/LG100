@@ -15,11 +15,13 @@ const adaptUser = (dbUser) => {
     photo_url: 'https://via.placeholder.com/50',
     segment: 'COLD',
     ltv_stats: { total: 0, game: 0, reaction: 0, social: 0, trigger: 0 },
-    social_stats: { likes: 0, comments: 0, reposts: 0, is_member: false },
+    social_stats: { likes: 0, comments: 0, reposts: 0, is_member: dbUser.isSubscribed !== false },
     games_played: dbUser.games ? dbUser.games.length : 0,
     last_active: dbUser.createdAt,
     source: 'bot',
-    games: dbUser.games // <--- Прокидываем игры дальше
+    games: dbUser.games, // <--- Прокидываем игры дальше
+    is_subscribed: dbUser.isSubscribed !== false,
+    unsubscribed_at: dbUser.unsubscribedAt || null,
   };
 };
 

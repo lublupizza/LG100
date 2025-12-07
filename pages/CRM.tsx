@@ -26,6 +26,15 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
   const [filterIsMember, setFilterIsMember] = useState<boolean | 'ALL'>('ALL');
   const [filterHasPlayed, setFilterHasPlayed] = useState<boolean | 'ALL'>('ALL');
 
+  const formatUnsubscribed = (dateStr?: string | null) => {
+    if (!dateStr) return '';
+    try {
+        return new Date(dateStr).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch (err) {
+        return '';
+    }
+  };
+
   // --- Filter Application Logic ---
   const applyFilters = () => {
     // 1. Basic Text & Segment
@@ -217,10 +226,13 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1 items-start">
                         {getSegmentBadge(user.segment)}
-                        {user.social_stats.is_member ? 
-                            <span className="text-[10px] text-gray-500 flex items-center gap-1"><Users size={10}/> Подписан</span> : 
-                            <span className="text-[10px] text-gray-400">Не подписан</span>
-                        }
+                        {user.is_subscribed ? (
+                            <span className="text-[10px] text-gray-500 flex items-center gap-1"><Users size={10}/> Подписан</span>
+                        ) : (
+                            <span className="text-[10px] text-red-500 flex items-center gap-1" title={formatUnsubscribed(user.unsubscribed_at)}>
+                                <Users size={10}/> Отписан{user.unsubscribed_at ? ` · ${formatUnsubscribed(user.unsubscribed_at)}` : ''}
+                            </span>
+                        )}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">

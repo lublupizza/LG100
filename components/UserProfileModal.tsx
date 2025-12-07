@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { User, UserHistoryItem, LtvCategory } from '../types';
-import { X, User as UserIcon, Calendar, Zap, Gamepad2, Heart, MessageSquare, Trophy, Activity, Target } from 'lucide-react';
+import { X, User as UserIcon, Calendar, Zap, Gamepad2, Heart, MessageSquare, Trophy, Activity, Target, ShieldAlert } from 'lucide-react';
 import { getUserActivityLog } from '../services/userService';
 
 interface UserProfileModalProps {
@@ -51,7 +51,12 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, onClose }) =>
                     <p className="text-sm text-gray-500 flex items-center gap-1">
                         <span className="font-mono">ID: {user.vk_id}</span>
                         <span className="text-gray-300">•</span>
-                        {user.social_stats.is_member ? 'Подписчик' : 'Гость'}
+                        {user.is_subscribed ? 'Подписчик' : 'Отписан'}
+                        {!user.is_subscribed && user.unsubscribed_at && (
+                            <span className="inline-flex items-center gap-1 text-red-500 text-xs font-semibold bg-red-50 border border-red-100 px-2 py-0.5 rounded-full ml-2">
+                                <ShieldAlert size={12}/> {new Date(user.unsubscribed_at).toLocaleDateString('ru-RU')}
+                            </span>
+                        )}
                     </p>
                     <div className="mt-2 flex gap-3 text-xs font-medium">
                         <span className="px-2 py-1 bg-white border border-gray-200 rounded text-gray-600 flex items-center gap-1">
