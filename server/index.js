@@ -16,10 +16,6 @@ const ffmpegPath = require('ffmpeg-static');
 const TOKEN = process.env.VK_TOKEN;
 const PORT = process.env.PORT || 3005;
 const staticRecipients = require('./data/recipients');
-const campaignsStorePath = path.join(__dirname, 'data', 'campaigns.json');
-const sendsStorePath = path.join(__dirname, 'data', 'campaign_sends.json');
-let campaignStore = [];
-let campaignSends = [];
 
 if (!TOKEN) {
   console.error('ERROR: VK_TOKEN not found');
@@ -328,41 +324,6 @@ app.get('/api/users', async (req, res) => {
 });
 app.get('/api/dashboard', (req, res) => res.json({ kpi: {}, charts: {}, lists: {} }));
 
-app.get('/api/games', async (_req, res) => {
-    const games = await prisma.game.findMany({ include: { user: true }, orderBy: { updatedAt: 'desc' } });
-    const payload = games.map((g) => ({
-        id: g.id,
-        user_id: g.userId,
-        user_name: g.user ? `${g.user.firstName || 'Игрок'} ${g.user.lastName || ''}`.trim() : `User ${g.userId}`,
-        type: g.type || 'BATTLESHIP',
-        channel: 'DM',
-        status: g.status,
-        started_at: g.createdAt,
-        updated_at: g.updatedAt || g.createdAt,
-        moves_count: g.moves || 0,
-        state_summary: g.status === 'ACTIVE' ? 'Идет бой' : 'Завершено',
-        board: g.board,
-    }));
-    res.json({ games: payload });
-});
-
-app.get('/api/games/:userId', async (req, res) => {
-    const userId = parseInt(req.params.userId);
-    if (!userId) return res.status(400).json({ error: 'Invalid userId' });
-    const game = await prisma.game.findFirst({ where: { userId }, orderBy: { updatedAt: 'desc' } });
-    if (!game) return res.status(404).json({ error: 'Game not found' });
-    res.json({
-        id: game.id,
-        user_id: game.userId,
-        type: game.type || 'BATTLESHIP',
-        status: game.status,
-        started_at: game.createdAt,
-        updated_at: game.updatedAt || game.createdAt,
-        moves_count: game.moves || 0,
-        board: game.board,
-    });
-});
-
 // === Рассылки ===
 const loadRecipients = async () => {
     // Берём реальные контакты из базы, если есть хоть один пользователь
@@ -390,89 +351,6 @@ const filterRecipients = (rawRecipients, segment, filters = {}) => {
         if (typeof filters.is_member === 'boolean' && r.is_member !== filters.is_member) return false;
         return true;
     });
-};
-
-const recordSends = (campaignId, audience) => {
-    const now = new Date().toISOString();
-    audience.forEach((user) => {
-        campaignSends.push({
-            campaign_id: campaignId,
-            user_vk_id: user.vkId,
-            sent_at: now,
-        });
-    });
-    persistJson(sendsStorePath, campaignSends);
-};
-
-const updateCampaignStore = (campaignId, data = {}) => {
-    const idx = campaignStore.findIndex((c) => c.id === campaignId);
-    if (idx >= 0) {
-        campaignStore[idx] = { ...campaignStore[idx], ...data };
-    } else {
-        campaignStore.unshift({ id: campaignId, created_at: new Date().toISOString(), stats: { sent: 0, delivered: 0, clicked: 0 }, ...data });
-    }
-    persistJson(campaignsStorePath, campaignStore);
-};
-
-const withinPeriod = (date, period) => {
-    if (!period || period === 'ALL') return true;
-    const map = { '1d': 1, '7d': 7, '1m': 30, '3m': 90 };
-    const days = map[period] || 3650;
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    return new Date(date).getTime() >= cutoff;
-};
-
-const buildFunnel = (campaignId, period = 'ALL') => {
-    const sends = campaignSends.filter((s) => s.campaign_id === campaignId && withinPeriod(s.sent_at, period));
-    const total = sends.length;
-    if (total === 0) {
-        return {
-            recipients_total: 0, views: 0, view_conversion: 0,
-            actions_total: 0, action_conversion: 0, avg_delay_seconds: 0, actions_by_type: {},
-            warm_hot_count: 0, warm_hot_rate: 0, warm_hot_from_acted: 0,
-        };
-    }
-
-    const viewed = sends.filter((s) => s.viewed_at && withinPeriod(s.viewed_at, period));
-    const acted = sends.filter((s) => s.first_action_at && withinPeriod(s.first_action_at, period));
-    const actions_by_type = {};
-    acted.forEach((s) => {
-        if (s.first_action_type) actions_by_type[s.first_action_type] = (actions_by_type[s.first_action_type] || 0) + 1;
-    });
-    return {
-        recipients_total: total,
-        views: viewed.length,
-        view_conversion: Math.round((viewed.length / total) * 100),
-        actions_total: acted.length,
-        action_conversion: Math.round((acted.length / total) * 100),
-        avg_delay_seconds: 0,
-        actions_by_type,
-        warm_hot_count: acted.length,
-        warm_hot_rate: Math.round((acted.length / total) * 100),
-        warm_hot_from_acted: acted.length,
-    };
-};
-
-const buildGlobalFunnel = (period = 'ALL') => {
-    const campaigns = campaignStore.map((c) => buildFunnel(c.id, period));
-    const summary = campaigns.reduce((acc, f) => {
-        acc.recipients_total += f.recipients_total;
-        acc.views += f.views;
-        acc.actions_total += f.actions_total;
-        acc.warm_hot_count += f.warm_hot_count;
-        return acc;
-    }, { recipients_total: 0, views: 0, actions_total: 0, warm_hot_count: 0 });
-
-    const total = summary.recipients_total || 1;
-    return {
-        ...summary,
-        view_conversion: Math.round((summary.views / total) * 100),
-        action_conversion: Math.round((summary.actions_total / total) * 100),
-        avg_delay_seconds: 0,
-        actions_by_type: {},
-        warm_hot_rate: Math.round((summary.warm_hot_count / total) * 100),
-        warm_hot_from_acted: summary.actions_total ? Math.round((summary.warm_hot_count / summary.actions_total) * 100) : 0,
-    };
 };
 
 const zlib = require('zlib');
@@ -514,63 +392,6 @@ const parseBase64DataUri = (dataUri = '', fallbackContentType = 'application/oct
         return null;
     }
 };
-
-app.get('/api/campaigns', (_req, res) => {
-    res.json({ campaigns: campaignStore });
-});
-
-app.post('/api/campaigns', (req, res) => {
-    const body = req.body || {};
-    const campaign = {
-        id: body.id || `c${Date.now()}`,
-        name: body.name,
-        type: body.type || 'STANDARD',
-        segment_target: body.segment_target || 'ALL',
-        message: body.message,
-        image_url: body.image_url,
-        image_base64: body.image_base64,
-        image_name: body.image_name,
-        voice_url: body.voice_url,
-        voice_base64: body.voice_base64,
-        voice_name: body.voice_name,
-        status: body.status || 'SCHEDULED',
-        stats: body.stats || { sent: 0, delivered: 0, clicked: 0 },
-        created_at: body.created_at || new Date().toISOString(),
-    };
-    campaignStore.unshift(campaign);
-    persistJson(campaignsStorePath, campaignStore);
-    res.json(campaign);
-});
-
-app.post('/api/campaigns/track-send', (req, res) => {
-    const { campaignId, vkId } = req.body || {};
-    if (!campaignId || !vkId) return res.status(400).json({ error: 'campaignId and vkId required' });
-    recordSends(campaignId, [{ vkId }]);
-    res.json({ ok: true });
-});
-
-app.post('/api/campaigns/track-reaction', (req, res) => {
-    const { userId, actionType, campaignId } = req.body || {};
-    if (!campaignId || !userId) return res.status(400).json({ error: 'campaignId and userId required' });
-    const send = campaignSends.find((s) => s.campaign_id === campaignId && (s.user_id === userId || s.user_vk_id === userId));
-    if (send) {
-        send.viewed_at = send.viewed_at || new Date().toISOString();
-        send.first_action_at = send.first_action_at || new Date().toISOString();
-        send.first_action_type = send.first_action_type || actionType;
-        persistJson(sendsStorePath, campaignSends);
-    }
-    res.json({ ok: true });
-});
-
-app.get('/api/campaigns/funnel', (req, res) => {
-    const period = req.query.period || 'ALL';
-    res.json(buildGlobalFunnel(period));
-});
-
-app.get('/api/campaigns/:id/funnel', (req, res) => {
-    const period = req.query.period || 'ALL';
-    res.json(buildFunnel(req.params.id, period));
-});
 
 const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
     if (!imageUrl) return reject(new Error('Image URL not provided'));
@@ -968,7 +789,6 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
 app.post('/api/campaigns/send', async (req, res) => {
     const {
         campaignId,
-        name,
         message,
         type,
         segment = 'ALL',
@@ -1140,26 +960,6 @@ app.post('/api/campaigns/send', async (req, res) => {
         }
     }
 
-    if (campaignId) {
-        recordSends(campaignId, audience);
-        const existing = campaignStore.find((c) => c.id === campaignId) || {};
-        updateCampaignStore(campaignId, {
-            ...existing,
-            name: existing.name || name,
-            status: 'SENT',
-            image_url: requestedImage || existing.image_url,
-            image_base64: requestedImageBase64 || existing.image_base64,
-            voice_url: requestedVoice || existing.voice_url,
-            voice_base64: voiceBase64 || existing.voice_base64,
-            stats: {
-                ...(existing.stats || {}),
-                sent,
-                delivered: sent,
-                clicked: (existing.stats && existing.stats.clicked) || 0,
-            },
-        });
-    }
-
     res.json({
         sent,
         failed: errors.length,
@@ -1172,28 +972,6 @@ app.post('/api/campaigns/send', async (req, res) => {
             games_played: u.games_played,
         })),
     });
-});
-
-app.post('/api/ask-ai', async (req, res) => {
-    const { prompt } = req.body || {};
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) return res.status(500).json({ error: 'AI key not configured' });
-    if (!prompt) return res.status(400).json({ error: 'prompt is required' });
-
-    try {
-        const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${key}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}] }),
-        });
-
-        const data = await aiRes.json();
-        const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('\n') || '';
-        res.json({ text, raw: data });
-    } catch (err) {
-        console.error('Gemini request failed', err);
-        res.status(500).json({ error: 'Failed to contact AI service' });
-    }
 });
 
 async function start() {
