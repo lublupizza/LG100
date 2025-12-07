@@ -1,294 +1,280 @@
-
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Campaign, UserSegment, CampaignType, TimePeriod } from '../types';
-import { mockCampaigns } from '../services/mockData';
-import { launchCampaign, recalculateGameStats } from '../services/campaignService';
-import { getCampaignFunnel } from '../services/campaignTrackingService';
-import { Send, Plus, Calendar, Gamepad2, Play, Clock, Eye, Activity, Flame, ChevronRight } from 'lucide-react';
+import { fetchCampaigns, launchCampaign, createCampaign } from '../services/campaignService';
+import { getCampaignFunnelForPeriod } from '../services/campaignTrackingService';
+import { Send, Plus, Calendar, Gamepad2, Play, Eye, Activity } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
 
 const Campaigns: React.FC = () => {
-  const [campaigns, setCampaigns] = useState<Campaign[]>(mockCampaigns);
-  const [period, setPeriod] = useState<TimePeriod>('7d'); 
-  
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [period, setPeriod] = useState<TimePeriod>('7d');
   const [isCreating, setIsCreating] = useState(false);
+  const [funnel, setFunnel] = useState<any>({ recipients_total: 0, views: 0, actions_total: 0, warm_hot_count: 0, warm_hot_rate: 0 });
   const [newCampaign, setNewCampaign] = useState({
     name: '',
     type: CampaignType.STANDARD,
     segment: 'ALL',
     message: '',
+    imageUrl: '',
+    imageData: '',
+    imageName: '',
+    voiceUrl: '',
+    voiceData: '',
+    voiceName: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const camp: Campaign = {
-        id: `c${Date.now()}`,
-        name: newCampaign.name,
-        type: newCampaign.type,
-        segment_target: newCampaign.segment as UserSegment | 'ALL',
-        message: newCampaign.message,
-        status: 'SCHEDULED',
-        stats: { sent: 0, delivered: 0, clicked: 0 },
-        created_at: new Date().toISOString().split('T')[0]
-    };
-    setCampaigns([camp, ...campaigns]);
-    setIsCreating(false);
-    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '' });
+  useEffect(() => {
+    loadCampaigns();
+  }, []);
+
+  useEffect(() => {
+    loadFunnel(period);
+  }, [period]);
+
+  const loadCampaigns = async () => {
+    const apiCampaigns = await fetchCampaigns();
+    setCampaigns(apiCampaigns);
   };
 
-  const handleLaunch = (id: string) => {
+  const loadFunnel = async (p: TimePeriod) => {
+    const stats = await getCampaignFunnelForPeriod(p);
+    setFunnel(stats);
+  };
+
+  const handleImageFile = (file?: File | null) => {
+    if (!file) {
+      setNewCampaign({ ...newCampaign, imageData: '', imageName: '', imageUrl: newCampaign.imageUrl });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setNewCampaign({
+        ...newCampaign,
+        imageData: typeof reader.result === 'string' ? reader.result : '',
+        imageUrl: '',
+        imageName: file.name,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleVoiceFile = (file?: File | null) => {
+    if (!file) {
+      setNewCampaign({ ...newCampaign, voiceData: '', voiceName: '', voiceUrl: newCampaign.voiceUrl });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setNewCampaign({
+        ...newCampaign,
+        voiceData: typeof reader.result === 'string' ? reader.result : '',
+        voiceUrl: '',
+        voiceName: file.name,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedImage = newCampaign.imageUrl.trim();
+    const normalizedImage = (newCampaign.imageData && newCampaign.imageData.trim()) || trimmedImage || undefined;
+    const voiceSource = (newCampaign.voiceData || newCampaign.voiceUrl).trim();
+    const normalizedVoice = voiceSource || undefined;
+    const payload: Partial<Campaign> = {
+      name: newCampaign.name,
+      id: `c${Date.now()}`,
+      type: newCampaign.type,
+      segment_target: newCampaign.segment as UserSegment | 'ALL',
+      message: newCampaign.message,
+      image_url: newCampaign.imageData ? undefined : normalizedImage,
+      image_base64: newCampaign.imageData || undefined,
+      image_name: newCampaign.imageName || undefined,
+      voice_url: normalizedVoice,
+      voice_base64: newCampaign.voiceData || undefined,
+      voice_name: newCampaign.voiceName || undefined,
+      status: 'SCHEDULED',
+      stats: { sent: 0, delivered: 0, clicked: 0 },
+      created_at: new Date().toISOString(),
+    };
+
+    const created = await createCampaign(payload);
+    if (created) {
+      setCampaigns((prev) => [created, ...prev]);
+      setIsCreating(false);
+      setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '' });
+    }
+  };
+
+  const handleLaunch = async (id: string) => {
+    const campaign = campaigns.find(c => c.id === id);
+    if (!campaign) return;
+
     if(confirm('Запустить рассылку сейчас?')) {
-        const success = launchCampaign(id);
-        if(success) {
-            setCampaigns([...mockCampaigns]); 
+        const updatedCampaign = await launchCampaign(campaign, {
+          segment_target: campaign.segment_target,
+        });
+        if (updatedCampaign) {
+            setCampaigns(prev => prev.map(c => c.id === id ? updatedCampaign : c));
         }
+        await loadFunnel(period);
     }
   };
 
   const filteredCampaigns = campaigns.filter(c => isDateInPeriod(c.created_at, period));
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <h3 className="text-xl font-bold text-gray-900">Рассылки и Пуши</h3>
-        
-        <div className="flex items-center gap-4 w-full md:w-auto">
-             <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm flex-1 md:flex-none">
-                 <Clock size={16} className="text-gray-400" />
-                 <select 
-                    value={period}
-                    onChange={(e) => setPeriod(e.target.value as TimePeriod)}
-                    className="bg-transparent text-sm font-medium text-gray-700 focus:outline-none cursor-pointer w-full"
-                 >
-                     <option value="1d">За 24 часа</option>
-                     <option value="7d">За 7 дней</option>
-                     <option value="14d">За 14 дней</option>
-                     <option value="1m">За 30 дней</option>
-                     <option value="3m">За 3 месяца</option>
-                     <option value="ALL">За всё время</option>
-                 </select>
-             </div>
+    <div className="space-y-6 animate-fade-in">
+      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-xl font-bold flex items-center gap-2 text-gray-900">
+            <Send className="text-pizza-red" />
+            Рассылки
+          </h3>
+          <p className="text-xs text-gray-500">Всего кампаний: {filteredCampaigns.length}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select value={period} onChange={(e) => setPeriod(e.target.value as TimePeriod)} className="text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
+            <option value="1d">24 часа</option>
+            <option value="7d">Неделя</option>
+            <option value="1m">Месяц</option>
+            <option value="ALL">Все</option>
+          </select>
+          <button onClick={() => setIsCreating(true)} className="flex items-center gap-2 bg-pizza-red text-white px-4 py-2 rounded-lg shadow hover:bg-red-600 transition">
+            <Plus size={16} /> Новая кампания
+          </button>
+        </div>
+      </div>
 
-            <button 
-              onClick={() => setIsCreating(true)}
-              className="flex items-center gap-2 bg-pizza-red hover:bg-pizza-dark text-white px-5 py-2 rounded-lg font-semibold transition-colors shadow-sm whitespace-nowrap"
-            >
-              <Plus size={18} /> <span className="hidden sm:inline">Создать</span>
-            </button>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm col-span-1">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity className="text-green-500" />
+            <div>
+              <p className="text-xs text-gray-500">Успешные рассылки за период</p>
+              <p className="text-lg font-bold text-gray-900">{funnel.recipients_total || 0} доставлено</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-xs text-gray-600">
+            <div className="p-3 bg-gray-50 rounded-lg border">
+              <p className="text-gray-500">Просмотры</p>
+              <p className="text-lg font-semibold text-gray-900">{funnel.views || 0}</p>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg border">
+              <p className="text-gray-500">Действия</p>
+              <p className="text-lg font-semibold text-gray-900">{funnel.actions_total || 0}</p>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg border">
+              <p className="text-gray-500">Warm/Hot</p>
+              <p className="text-lg font-semibold text-gray-900">{funnel.warm_hot_count || 0}</p>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg border">
+              <p className="text-gray-500">Конверсия</p>
+              <p className="text-lg font-semibold text-gray-900">{funnel.warm_hot_rate || 0}%</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm col-span-1 lg:col-span-2">
+          <div className="flex items-center gap-2 mb-4">
+            <Gamepad2 className="text-purple-500" />
+            <div>
+              <p className="text-xs text-gray-500">Игровые кампании</p>
+              <p className="text-lg font-bold text-gray-900">{filteredCampaigns.filter(c => c.type === CampaignType.GAME_BATTLESHIP).length}</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {filteredCampaigns.map((c) => (
+              <div key={c.id} className="border border-gray-200 rounded-lg p-3 flex justify-between items-start hover:border-pizza-red transition cursor-pointer">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] px-2 py-1 rounded font-bold ${c.status === 'SENT' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                      {c.status === 'SENT' ? 'ОТПРАВЛЕНА' : 'АКТИВНА'}
+                    </span>
+                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                      <Calendar size={12} /> {new Date(c.created_at).toLocaleDateString('ru-RU')}
+                    </span>
+                  </div>
+                  <p className="font-semibold text-gray-900">{c.name}</p>
+                  <p className="text-xs text-gray-500 line-clamp-2">{c.message}</p>
+                  {c.image_url && <img src={c.image_url} alt="preview" className="h-12 rounded" />}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <button onClick={() => handleLaunch(c.id)} className="flex items-center gap-1 text-pizza-red text-sm font-semibold hover:underline">
+                    <Play size={14} /> Запустить
+                  </button>
+                  <div className="text-[11px] text-gray-500 flex items-center gap-1">
+                    <Eye size={12} /> {c.stats.sent || 0} отправлено
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {isCreating && (
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm animate-fade-in">
-          <h4 className="text-lg font-bold text-gray-800 mb-6 border-b border-gray-100 pb-2">Новая рассылка</h4>
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Название</label>
-                <input 
-                  required
-                  type="text" 
-                  className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
-                  value={newCampaign.name}
-                  onChange={e => setNewCampaign({...newCampaign, name: e.target.value})}
-                  placeholder="Например: Битва за скидку"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Тип кампании</label>
-                <select 
-                  className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
-                  value={newCampaign.type}
-                  onChange={e => setNewCampaign({...newCampaign, type: e.target.value as CampaignType})}
-                >
-                  <option value={CampaignType.STANDARD}>Обычная (Текст/Картинка)</option>
-                  <option value={CampaignType.GAME_BATTLESHIP}>Игровая (Морской Бой)</option>
-                </select>
-              </div>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <form onSubmit={handleSubmit} className="bg-white rounded-xl p-6 w-full max-w-2xl space-y-4 shadow-xl">
+            <div className="flex justify-between items-center">
+              <h4 className="text-lg font-bold">Новая кампания</h4>
+              <button type="button" onClick={() => setIsCreating(false)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
             </div>
-            
-            <div>
-               <label className="block text-sm font-semibold text-gray-700 mb-1.5">Сегмент получателей</label>
-               <select 
-                 className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
-                 value={newCampaign.segment}
-                 onChange={e => setNewCampaign({...newCampaign, segment: e.target.value})}
-               >
-                 <option value="ALL">Все пользователи</option>
-                 <option value={UserSegment.COLD}>Только холодные</option>
-                 <option value={UserSegment.WARM}>Только тёплые</option>
-                 <option value={UserSegment.HOT}>Только горячие</option>
-               </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  {newCampaign.type === CampaignType.GAME_BATTLESHIP ? 'Стартовое сообщение игры' : 'Текст сообщения'}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Название
+                <input value={newCampaign.name} onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })} className="mt-1 p-2 border rounded" required />
               </label>
-              <textarea 
-                required
-                rows={3}
-                className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all resize-none"
-                value={newCampaign.message}
-                onChange={e => setNewCampaign({...newCampaign, message: e.target.value})}
-                placeholder={newCampaign.type === CampaignType.GAME_BATTLESHIP ? "Капитан, враг на горизонте! Пиши A1 чтобы стрелять..." : "Текст..."}
-              />
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Тип
+                <select value={newCampaign.type} onChange={(e) => setNewCampaign({ ...newCampaign, type: e.target.value as CampaignType })} className="mt-1 p-2 border rounded">
+                  <option value={CampaignType.STANDARD}>Стандартная</option>
+                  <option value={CampaignType.GAME_BATTLESHIP}>Морской бой</option>
+                </select>
+              </label>
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Сегмент
+                <select value={newCampaign.segment} onChange={(e) => setNewCampaign({ ...newCampaign, segment: e.target.value })} className="mt-1 p-2 border rounded">
+                  <option value="ALL">Все</option>
+                  <option value={UserSegment.COLD}>Cold</option>
+                  <option value={UserSegment.WARM}>Warm</option>
+                  <option value={UserSegment.HOT}>Hot</option>
+                </select>
+              </label>
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Сообщение
+                <textarea value={newCampaign.message} onChange={(e) => setNewCampaign({ ...newCampaign, message: e.target.value })} className="mt-1 p-2 border rounded h-24" required />
+              </label>
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Картинка (URL)
+                <input value={newCampaign.imageUrl} onChange={(e) => setNewCampaign({ ...newCampaign, imageUrl: e.target.value, imageData: '' })} className="mt-1 p-2 border rounded" placeholder="https://..." />
+              </label>
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Картинка (файл)
+                <input type="file" accept="image/*" onChange={(e) => handleImageFile(e.target.files?.[0])} className="mt-1" />
+                {newCampaign.imageData && <span className="text-xs text-gray-500 mt-1">{newCampaign.imageName}</span>}
+              </label>
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Голосовое (URL)
+                <input value={newCampaign.voiceUrl} onChange={(e) => setNewCampaign({ ...newCampaign, voiceUrl: e.target.value, voiceData: '' })} className="mt-1 p-2 border rounded" placeholder="https://..." />
+              </label>
+              <label className="flex flex-col text-sm font-semibold text-gray-700">
+                Голосовое (файл)
+                <input type="file" accept="audio/*" onChange={(e) => handleVoiceFile(e.target.files?.[0])} className="mt-1" />
+                {newCampaign.voiceData && <span className="text-xs text-gray-500 mt-1">{newCampaign.voiceName}</span>}
+              </label>
             </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-              <button 
-                type="button" 
-                onClick={() => setIsCreating(false)}
-                className="px-5 py-2.5 text-gray-600 hover:text-gray-900 font-medium"
-              >
-                Отмена
-              </button>
-              <button 
-                type="submit" 
-                className="bg-pizza-red hover:bg-pizza-dark text-white px-6 py-2.5 rounded-lg font-semibold shadow-sm transition-colors"
-              >
-                Создать
-              </button>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setIsCreating(false)} className="px-4 py-2 bg-gray-100 rounded text-sm font-semibold">Отмена</button>
+              <button type="submit" className="px-4 py-2 bg-pizza-red text-white rounded text-sm font-semibold">Создать</button>
             </div>
           </form>
         </div>
       )}
-
-      <div className="grid grid-cols-1 gap-4">
-        {filteredCampaigns.length > 0 ? filteredCampaigns.map(camp => {
-            // Рассчитываем полную воронку
-            const funnel = getCampaignFunnel(camp.id, period);
-            
-            return (
-              <div key={camp.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4 hover:border-red-200 transition-colors">
-                
-                {/* Header Row */}
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h4 className="font-bold text-lg text-gray-900">{camp.name}</h4>
-                      {camp.type === CampaignType.GAME_BATTLESHIP && (
-                          <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-purple-200 text-purple-700 bg-purple-50 font-bold tracking-wide">
-                              <Gamepad2 size={10} /> МОРСКОЙ БОЙ
-                          </span>
-                      )}
-                      <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold tracking-wide ${
-                          camp.status === 'SENT' ? 'border-green-200 text-green-700 bg-green-50' : 
-                          'border-gray-200 text-gray-500 bg-gray-50'
-                      }`}>
-                          {camp.status === 'SENT' ? 'АКТИВНА' : 'ЧЕРНОВИК'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600 mb-3 truncate max-w-xl">{camp.message}</p>
-                    <div className="flex gap-4 text-xs text-gray-500 font-medium">
-                      <span className="flex items-center gap-1"><Calendar size={14} /> {camp.created_at}</span>
-                      <span>Сегмент: <span className="text-gray-700">{camp.segment_target === 'ALL' ? 'Все' : camp.segment_target}</span></span>
-                    </div>
-                  </div>
-
-                  <div className="pl-6">
-                    {camp.status === 'SCHEDULED' ? (
-                         <button 
-                            onClick={() => handleLaunch(camp.id)}
-                            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors"
-                         >
-                            <Play size={16} /> Старт
-                         </button>
-                     ) : (
-                         <button className="p-2.5 bg-gray-50 rounded-lg text-gray-400 cursor-default">
-                           <Send size={20} />
-                         </button>
-                     )}
-                  </div>
-                </div>
-
-                {/* Funnel Block */}
-                {camp.status === 'SENT' && (
-                  <div className="border-t border-gray-100 pt-4">
-                    <h5 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
-                        Воронка прогрева ({period === 'ALL' ? 'За все время' : period})
-                    </h5>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                        
-                        {/* 1. Отправлено (Нейтральный серый #E0E0E0 style) */}
-                        <div className="bg-gray-100 rounded-lg p-3 relative overflow-hidden group border border-gray-300">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-gray-400"></div>
-                             <div className="text-2xl font-bold text-gray-800">{funnel.recipients_total}</div>
-                             <div className="text-[10px] text-gray-600 font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Send size={10}/> Отправлено
-                             </div>
-                        </div>
-
-                        {/* 2. Увидели (Мягкий желтый #FFF3CD style) */}
-                        <div className="bg-yellow-50 rounded-lg p-3 relative overflow-hidden group border border-yellow-200">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-yellow-400"></div>
-                             <div className="text-2xl font-bold text-gray-900">
-                                 {funnel.views}
-                                 <span className="text-sm text-yellow-700 font-medium ml-1">({funnel.view_conversion}%)</span>
-                             </div>
-                             <div className="text-[10px] text-yellow-700 font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Eye size={10}/> Просмотрено
-                             </div>
-                        </div>
-
-                        {/* 3. Действие (Оранжевый #FFC107 style) */}
-                        <div className="bg-orange-100 rounded-lg p-3 relative overflow-hidden group border border-orange-300">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-orange-500"></div>
-                             <div className="text-2xl font-bold text-gray-900">
-                                 {funnel.actions_total}
-                                 <span className="text-sm text-orange-800 font-medium ml-1">({funnel.action_conversion}%)</span>
-                             </div>
-                             <div className="text-[10px] text-orange-800 font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Activity size={10}/> Действие
-                             </div>
-                        </div>
-
-                        {/* 4. Warm/Hot (Брендовый красный) */}
-                        <div className="bg-red-50 rounded-lg p-3 relative overflow-hidden group border border-red-200">
-                             <div className="absolute right-0 top-0 h-full w-1.5 bg-pizza-red"></div>
-                             <div className="text-2xl font-bold text-gray-900">
-                                 {funnel.warm_hot_count}
-                                 <span className="text-sm text-pizza-red font-bold ml-1">({funnel.warm_hot_from_acted}%)</span>
-                             </div>
-                             <div className="text-[10px] text-pizza-red font-bold uppercase flex items-center gap-1 mt-1">
-                                 <Flame size={10}/> Warm / Hot
-                             </div>
-                        </div>
-
-                    </div>
-                    
-                    {/* Action Breakdown Table */}
-                    <div className="mt-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
-                         <div className="flex justify-between items-center mb-2">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase">Детализация действий</span>
-                            <span className="text-[10px] text-gray-400">Ср. время реакции: {funnel.avg_delay_seconds} сек.</span>
-                         </div>
-                         <div className="flex flex-wrap gap-2">
-                             {Object.entries(funnel.actions_by_type).length > 0 ? (
-                                 Object.entries(funnel.actions_by_type).map(([type, count]) => (
-                                     <span key={type} className="inline-flex items-center gap-1.5 bg-white px-2.5 py-1 rounded border border-gray-200 text-xs font-medium text-gray-700 shadow-sm">
-                                         {type === 'game_start' && <Gamepad2 size={12} className="text-purple-500"/>}
-                                         {type === 'push_open' && <Eye size={12} className="text-blue-500"/>}
-                                         <span>{type}:</span>
-                                         <span className="font-bold text-pizza-red">{count}</span>
-                                     </span>
-                                 ))
-                             ) : (
-                                 <span className="text-xs text-gray-400 italic">Действий пока нет</span>
-                             )}
-                         </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-        }) : (
-             <div className="text-center py-10 bg-gray-50 rounded-xl border border-gray-200 border-dashed text-gray-400">
-                 Нет кампаний за выбранный период
-             </div>
-        )}
-      </div>
     </div>
   );
 };

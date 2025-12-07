@@ -1,76 +1,79 @@
-
-import { User, UserHistoryItem, EventType, LtvCategory } from '../types';
+import { User, UserHistoryItem, EventType, UserSegment } from '../types';
 import { EVENT_CATEGORIES, EVENT_WEIGHTS } from './ltvEngine';
-import { mockCampaigns, mockGames } from './mockData';
+
+const adaptUser = (dbUser: any): User => {
+  const games = dbUser.games || [];
+  return {
+    id: dbUser.id,
+    vk_id: dbUser.vkId,
+    first_name: dbUser.firstName || 'Пользователь',
+    last_name: dbUser.lastName || `#${dbUser.vkId}`,
+    photo_url: dbUser.photoUrl || 'https://via.placeholder.com/50',
+    segment: (dbUser.segment as UserSegment) || UserSegment.COLD,
+    ltv: dbUser.ltv || 0,
+    ltv_stats: dbUser.ltv_stats || { total: 0, game: 0, reaction: 0, social: 0, trigger: 0 },
+    social_stats: dbUser.social_stats || { likes: 0, comments: 0, reposts: 0, is_member: false },
+    games_played: games.length,
+    last_active: dbUser.updatedAt || dbUser.createdAt || new Date().toISOString(),
+    source: dbUser.source || 'bot',
+    games,
+  };
+};
+
+export const fetchUsers = async (limit = 50, offset = 0): Promise<{ users: User[]; total: number }> => {
+  const res = await fetch(`/api/users?limit=${limit}&offset=${offset}`);
+  if (!res.ok) {
+    console.error('Не удалось получить пользователей', res.statusText);
+    return { users: [], total: 0 };
+  }
+
+  const payload = await res.json();
+  const users = (payload.users || payload || []).map(adaptUser);
+  const total = payload.total ?? users.length;
+  return { users, total };
+};
 
 /**
- * Генерирует мок-историю событий на основе агрегированных данных пользователя
+ * Генерирует историю активности на основе реальных игровых сессий пользователя
  */
 export const getUserActivityLog = (user: User): UserHistoryItem[] => {
   const history: UserHistoryItem[] = [];
 
-  const addEvent = (type: EventType, dateOffsetDays: number, desc?: string, meta?: any) => {
-    const date = new Date();
-    date.setDate(date.getDate() - dateOffsetDays);
-    // Добавляем случайное время
-    date.setHours(Math.floor(Math.random() * 23), Math.floor(Math.random() * 59));
-
+  const addEvent = (type: EventType, date: string, desc?: string, meta?: any) => {
     history.push({
       id: `evt_${Math.random().toString(36).substr(2, 9)}`,
       type,
       category: EVENT_CATEGORIES[type],
-      date: date.toISOString(),
+      date,
       description: desc || `Событие: ${type}`,
       value_change: EVENT_WEIGHTS[type],
-      metadata: meta
+      metadata: meta,
     });
   };
 
-  // 1. Генерируем игровые события
-  // Ищем реальные сессии из mockGames
-  const userGames = mockGames.filter(g => g.user_id === user.id);
-  userGames.forEach(g => {
-      // День старта игры (парсим дату из игры)
-      const gameDate = new Date(g.started_at);
-      const daysAgo = Math.floor((new Date().getTime() - gameDate.getTime()) / (1000 * 3600 * 24));
-      
-      addEvent(EventType.GAME_START, daysAgo, `Начал игру: ${g.type}`, { game_id: g.id });
-      if (g.status === 'FINISHED') {
-          addEvent(EventType.GAME_WIN, daysAgo, `Завершил игру: ${g.type}`);
-      }
+  (user.games || []).forEach((g: any) => {
+    const startedAt = g.createdAt || g.started_at;
+    if (startedAt) {
+      addEvent(EventType.GAME_START, startedAt, `Начал игру: ${g.type || 'BATTLESHIP'}`, { game_id: g.id });
+    }
+    if (g.status === 'FINISHED' && g.updatedAt) {
+      addEvent(EventType.GAME_WIN, g.updatedAt, `Завершил игру: ${g.type || 'BATTLESHIP'}`, { game_id: g.id });
+    }
   });
 
-  // Если игр в статистике больше, чем в мок-базе, добиваем рандомными
-  const extraGames = user.games_played - userGames.length;
-  for (let i = 0; i < extraGames; i++) {
-      addEvent(EventType.GAME_START, Math.floor(Math.random() * 60), 'Начал игру (Архив)');
-  }
-
-  // 2. Генерируем соц. активность
-  for (let i = 0; i < user.social_stats.likes; i++) {
-      addEvent(EventType.LIKE_POST, Math.floor(Math.random() * 30), 'Лайкнул пост');
-  }
-  for (let i = 0; i < user.social_stats.comments; i++) {
-      addEvent(EventType.COMMENT_POST, Math.floor(Math.random() * 30), 'Оставил комментарий');
-  }
-  if (user.social_stats.is_member) {
-      addEvent(EventType.GROUP_JOIN, Math.floor(Math.random() * 90) + 10, 'Вступил в группу');
-  }
-
-  // 3. Триггеры (Intent)
-  // Примерно оцениваем кол-во триггеров по баллам LTV
-  const triggerPoints = user.ltv_stats.trigger;
-  const estimatedLeads = Math.floor(triggerPoints / 10);
-  for (let i = 0; i < estimatedLeads; i++) {
-      addEvent(EventType.LEAD, Math.floor(Math.random() * 14), 'Нажал "Хочу Пиццу"');
-  }
-
-  // Сортировка: новые сверху
   return history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };
 
-export const getUserCampaignsHistory = (userId: number) => {
-    // В реальном проекте тут запрос к campaign_sends
-    // Эмулируем, что пользователь участвовал в случайных кампаниях
-    return mockCampaigns.filter(() => Math.random() > 0.5); 
+export const getUserCampaignsHistory = async (_userId: number) => {
+  try {
+    const res = await fetch(`/api/campaigns?userId=${_userId}`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('Не удалось загрузить историю кампаний', e);
+  }
+  return [];
 };
+
+export const adaptUserFromApi = adaptUser;
