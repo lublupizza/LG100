@@ -13,6 +13,7 @@ interface CRMProps {
 const CRM: React.FC<CRMProps> = ({ users }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [showUnsubscribedOnly, setShowUnsubscribedOnly] = useState(false);
 
   // --- Filters State ---
   const [filterSegment, setFilterSegment] = useState<UserSegment | 'ALL'>('ALL');
@@ -39,11 +40,12 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
   const applyFilters = () => {
     // 1. Basic Text & Segment
     let filtered = users.filter(user => {
-      const matchesSearch = 
-        user.first_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      const matchesSearch =
+        user.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.last_name.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesSegment = filterSegment === 'ALL' || user.segment === filterSegment;
-      return matchesSearch && matchesSegment;
+      const matchesSubscription = showUnsubscribedOnly ? user.is_subscribed === false : true;
+      return matchesSearch && matchesSegment && matchesSubscription;
     });
 
     // 2. Advanced LTV & Activity Filters
@@ -68,6 +70,7 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
   };
 
   const finalUsers = applyFilters();
+  const unsubscribedCount = users.filter((u) => u.is_subscribed === false).length;
 
   const handleExport = () => {
     const dateStr = new Date().toISOString().split('T')[0];
@@ -152,6 +155,14 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
                 </select>
             </div>
 
+            <button
+                onClick={() => setShowUnsubscribedOnly((prev) => !prev)}
+                className={`flex items-center gap-2 px-4 h-[42px] rounded-lg text-sm font-semibold transition-all border ${showUnsubscribedOnly ? 'bg-red-50 text-red-700 border-red-200 shadow-sm' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}
+            >
+                <Users size={16} />
+                Отписались ({unsubscribedCount})
+            </button>
+
             {/* Booleans: Membership & Games */}
             <select
                 className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none text-gray-700 shadow-sm cursor-pointer h-[42px]"
@@ -175,7 +186,7 @@ const CRM: React.FC<CRMProps> = ({ users }) => {
 
             <div className="flex-1"></div>
 
-            <button 
+            <button
                 onClick={handleExport}
                 className="flex items-center gap-2 bg-pizza-red hover:bg-pizza-dark text-white border border-transparent px-5 py-2.5 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95"
             >
