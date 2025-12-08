@@ -897,6 +897,13 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName, peerId } 
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
+    console.log("CAMPAIGN IMAGE DEBUG:", {
+        imageUrl: req.body.imageUrl,
+        image_url: req.body.image_url,
+        imageBase64: req.body.imageBase64 ? req.body.imageBase64.slice(0,100) : null,
+        image_base64: req.body.image_base64 ? req.body.image_base64.slice(0,100) : null,
+        imageName: req.body.imageName,
+    });
     const {
         campaignId,
         message,
