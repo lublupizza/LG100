@@ -4,6 +4,30 @@ import { registerEvent } from './ltvEngine';
 import { recordCampaignSend } from './campaignTrackingService';
 import { isDateInPeriod } from '../utils/dateHelpers';
 
+const CAMPAIGNS_STORAGE_KEY = 'campaigns_local_cache';
+
+const hydrateFromStorage = (): Campaign[] => {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const stored = localStorage.getItem(CAMPAIGNS_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn('Failed to load campaigns from storage', err);
+    return [];
+  }
+};
+
+export const persistCampaigns = (campaigns: Campaign[]) => {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(CAMPAIGNS_STORAGE_KEY, JSON.stringify(campaigns));
+  } catch (err) {
+    console.warn('Failed to persist campaigns', err);
+  }
+};
+
 type CampaignFilter = {
   segment_target?: UserSegment | 'ALL';
   min_games?: number;
@@ -26,7 +50,15 @@ const apiFetch = async <T>(url: string, init?: RequestInit): Promise<T | null> =
 
 export const hydrateCampaigns = async (): Promise<Campaign[]> => {
   const campaigns = await apiFetch<Campaign[]>('/api/campaigns');
-  return Array.isArray(campaigns) ? campaigns : [];
+  const fromApi = Array.isArray(campaigns) ? campaigns : [];
+
+  if (fromApi.length > 0) {
+    persistCampaigns(fromApi);
+    return fromApi;
+  }
+
+  const fallback = hydrateFromStorage();
+  return fallback;
 };
 
 export const launchCampaign = async (
