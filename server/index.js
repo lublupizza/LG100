@@ -928,7 +928,8 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     const rawImage = (imageUrl || image_url || '').trim();
     const requestedImageBase64 = (imageBase64 || imageBase64Snake || (rawImage.startsWith('data:') ? rawImage : '')).trim();
-    const requestedImage = requestedImageBase64 ? '' : rawImage;
+    const requestedImage = (imageBase64 || imageBase64Snake) ? '' : rawImage;
+    console.log("UPLOAD DEBUG:", { rawImage, requestedImageBase64, requestedImage });
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
     let sharedPhotoBuffer = null;
