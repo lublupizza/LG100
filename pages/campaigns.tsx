@@ -69,7 +69,12 @@ const Campaigns: React.FC = () => {
 
   const handleImageFile = async (file?: File | null) => {
     if (!file) {
-      setNewCampaign(prev => ({ ...prev, imageData: '', imageName: '', imageUrl: prev.imageUrl }));
+      setNewCampaign(prev => ({
+        ...prev,
+        imageData: '',
+        imageName: '',
+        imageUrl: prev.imageUrl
+      }));
       return;
     }
 
@@ -93,7 +98,12 @@ const Campaigns: React.FC = () => {
         }));
       } catch (readErr) {
         console.error('Failed to read image file', readErr);
-        setNewCampaign(prev => ({ ...prev, imageData: '', imageUrl: '', imageName: '' }));
+        setNewCampaign(prev => ({
+          ...prev,
+          imageData: '',
+          imageUrl: '',
+          imageName: ''
+        }));
       }
     }
   };
