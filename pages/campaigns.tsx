@@ -128,23 +128,25 @@ const Campaigns: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedImage = newCampaign.imageUrl.trim();
-    const normalizedImage = (newCampaign.imageData && newCampaign.imageData.trim()) || trimmedImage || undefined;
-    const voiceSource = (newCampaign.voiceData || newCampaign.voiceUrl).trim();
-    const normalizedVoice = voiceSource || undefined;
+
+    const trimmedImageUrl = newCampaign.imageUrl.trim();
+    const imageBase64 = (newCampaign.imageData || '').trim();
+    const imageUrl = imageBase64 ? '' : trimmedImageUrl;
+
+    const voiceBase64 = (newCampaign.voiceData || '').trim();
+    const voiceUrl = voiceBase64 ? '' : newCampaign.voiceUrl.trim();
+
     const camp: Campaign = {
         id: `c${Date.now()}`,
         name: newCampaign.name,
         type: newCampaign.type,
         segment_target: newCampaign.segment as UserSegment | 'ALL',
         message: newCampaign.message,
-        image_url: newCampaign.imageData ? undefined : (normalizedImage || undefined),
-        image_base64: newCampaign.imageData || undefined,
+        image_url: imageUrl || undefined,
+        image_base64: imageBase64 || undefined,
         image_name: newCampaign.imageName || undefined,
-        // Дублируем для обратной совместимости с разными полями
-        ...(normalizedImage ? { imageUrl: normalizedImage } : { imageUrl: undefined } as any),
-        voice_url: normalizedVoice,
-        voice_base64: newCampaign.voiceData || undefined,
+        voice_url: voiceUrl || undefined,
+        voice_base64: voiceBase64 || undefined,
         voice_name: newCampaign.voiceName || undefined,
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
