@@ -275,11 +275,19 @@ vk.updates.on('message_new', async (ctx) => {
         
         await ctx.send('🎨 Рисую...');
         const buffer = await generateBoardImage(JSON.parse(lastGame.board));
-        const photo = await vk.upload.messagePhoto({ source: { value: buffer } });
-        
+
+        const photo = await vk.upload.messagePhoto({
+            peer_id: ctx.peerId,
+            source: { value: buffer },
+        });
+
+        const attachment = photo?.owner_id && photo?.id
+            ? `photo${photo.owner_id}_${photo.id}${photo.access_key ? '_' + photo.access_key : ''}`
+            : null;
+
         return ctx.send({
             message: `Игра #${lastGame.id}. Победитель: ${user.firstName}`,
-            attachment: photo,
+            attachment: attachment || undefined,
             keyboard: Keyboard.builder().textButton({ label: 'Старт', color: 'positive' }).oneTime()
         });
     }
