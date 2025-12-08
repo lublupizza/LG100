@@ -890,8 +890,9 @@ app.post('/api/campaigns/send', async (req, res) => {
     const audience = filterRecipients(await loadRecipients(), segment, filters);
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
-    const requestedImage = (imageUrl || image_url || '').trim();
-    const requestedImageBase64 = (imageBase64 || imageBase64Snake || '').trim();
+    const rawImage = (imageUrl || image_url || '').trim();
+    const requestedImageBase64 = (imageBase64 || imageBase64Snake || (rawImage.startsWith('data:') ? rawImage : '')).trim();
+    const requestedImage = requestedImageBase64 ? '' : rawImage;
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
     const photoResult = await uploadCampaignImage({ imageUrl: requestedImage, imageBase64: requestedImageBase64, imageName });
