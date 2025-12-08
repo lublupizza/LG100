@@ -474,71 +474,43 @@ const parseBase64DataUri = (dataUri = '', fallbackContentType = 'application/oct
     }
 };
 
-const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
-    if (!imageUrl) return reject(new Error('Image URL not provided'));
+const fetchImageBuffer = async (imageUrl, redirectDepth = 0) => {
+    if (!imageUrl) throw new Error("Image URL not provided");
+    if (redirectDepth > 5) throw new Error("Too many redirects");
 
-    try {
-        const url = new URL(imageUrl.trim());
-        const client = url.protocol === 'https:' ? https : http;
+    return new Promise((resolve, reject) => {
+        const url = new URL(imageUrl);
+        const client = url.protocol === "https:" ? https : http;
 
-        const request = client.get({
-            protocol: url.protocol,
-            hostname: url.hostname,
-            port: url.port || undefined,
-            path: url.pathname + (url.search || ''),
-            headers: {
-                'Accept': 'image/*,*/*;q=0.8',
-                'Accept-Encoding': 'identity',
-                'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)',
-                'Host': url.hostname,
-            },
-        }, (response) => {
-            if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                if (redirectDepth > 3) return reject(new Error('Too many redirects while fetching image'));
-                const redirectUrl = new URL(response.headers.location, url);
-                return resolve(fetchImageBuffer(redirectUrl.toString(), redirectDepth + 1));
+        const req = client.get(imageUrl, (res) => {
+            // Redirect support
+            if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                const loc = res.headers.location;
+                if (!loc) return reject(new Error("Redirect without location header"));
+                return resolve(fetchImageBuffer(loc, redirectDepth + 1));
             }
 
-            if (response.statusCode !== 200) {
-                return reject(new Error(`Failed to fetch image. Status: ${response.statusCode}`));
+            if (res.statusCode !== 200) {
+                return reject(new Error("Bad status code: " + res.statusCode));
             }
 
-            const contentType = response.headers['content-type'] || '';
-            const encoding = (response.headers['content-encoding'] || 'identity').toLowerCase();
+            const contentType = res.headers["content-type"] || "";
             const chunks = [];
-            response.on('data', (chunk) => chunks.push(chunk));
-            response.on('end', () => {
-                const rawBuffer = Buffer.concat(chunks);
 
-                const finish = (buffer) => resolve({ buffer, contentType });
-
-                if (encoding === 'gzip') {
-                    return zlib.gunzip(rawBuffer, (err, decompressed) => {
-                        if (err) return reject(err);
-                        return finish(decompressed);
-                    });
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => {
+                const buffer = Buffer.concat(chunks);
+                if (!buffer || buffer.length === 0) {
+                    return reject(new Error("Empty image buffer"));
                 }
-
-                if (encoding === 'deflate') {
-                    return zlib.inflate(rawBuffer, (err, decompressed) => {
-                        if (err) return reject(err);
-                        return finish(decompressed);
-                    });
-                }
-
-                return finish(rawBuffer);
+                resolve({ buffer, contentType });
             });
         });
 
-        request.setTimeout(15000, () => {
-            request.destroy(new Error('Image request timed out'));
-        });
-
-        request.on('error', reject);
-    } catch (err) {
-        reject(err);
-    }
-});
+        req.on("error", (err) => reject(err));
+        req.end();
+    });
+};
 
 const fetchAudioBuffer = (audioUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
     if (!audioUrl) return reject(new Error('Audio URL not provided'));
