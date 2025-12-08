@@ -67,7 +67,7 @@ export const launchCampaign = async (
 ): Promise<Campaign | null> => {
   if (!campaign) return null;
 
-  const imageBase64 = (campaign as any).image_base64;
+  const imageBase64 = (campaign as any).image_base64 || (campaign as any).imageBase64 || (campaign as any).imageData;
   const imageUrl = !imageBase64 ? (((campaign as any).imageUrl || campaign.image_url || '').trim()) : '';
   const voiceBase64 = (campaign as any).voice_base64;
   const voiceUrl = !voiceBase64 ? (((campaign as any).voice_url || (campaign as any).voiceUrl || '').trim()) : '';
@@ -94,6 +94,7 @@ export const launchCampaign = async (
     imageUrl,
     image_url: imageUrl,
     image_base64: imageBase64,
+    imageBase64: imageBase64 || '',
     imageName: (campaign as any).image_name,
     voiceUrl,
     voice_url: voiceUrl,
