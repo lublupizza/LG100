@@ -897,6 +897,13 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName, peerId } 
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
+    console.log("CAMPAIGN IMAGE DEBUG:", {
+        imageUrl: req.body.imageUrl,
+        image_url: req.body.image_url,
+        imageBase64: req.body.imageBase64 ? req.body.imageBase64.slice(0,100) : null,
+        image_base64: req.body.image_base64 ? req.body.image_base64.slice(0,100) : null,
+        imageName: req.body.imageName,
+    });
     const {
         campaignId,
         message,
@@ -921,7 +928,8 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     const rawImage = (imageUrl || image_url || '').trim();
     const requestedImageBase64 = (imageBase64 || imageBase64Snake || (rawImage.startsWith('data:') ? rawImage : '')).trim();
-    const requestedImage = requestedImageBase64 ? '' : rawImage;
+    const requestedImage = (imageBase64 || imageBase64Snake) ? '' : rawImage;
+    console.log("UPLOAD DEBUG:", { rawImage, requestedImageBase64, requestedImage });
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
     let sharedPhotoBuffer = null;
