@@ -479,15 +479,16 @@ const fetchImageBuffer = async (imageUrl, redirectDepth = 0) => {
     if (redirectDepth > 5) throw new Error("Too many redirects");
 
     return new Promise((resolve, reject) => {
-        const url = new URL(imageUrl);
-        const client = url.protocol === "https:" ? https : http;
+        const currentUrl = new URL(imageUrl);
+        const client = currentUrl.protocol === "https:" ? https : http;
 
-        const req = client.get(imageUrl, (res) => {
-            // Redirect support
+        const req = client.get(currentUrl, (res) => {
             if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
                 const loc = res.headers.location;
                 if (!loc) return reject(new Error("Redirect without location header"));
-                return resolve(fetchImageBuffer(loc, redirectDepth + 1));
+
+                const nextUrl = new URL(loc, currentUrl);
+                return resolve(fetchImageBuffer(nextUrl.toString(), redirectDepth + 1));
             }
 
             if (res.statusCode !== 200) {
@@ -498,6 +499,7 @@ const fetchImageBuffer = async (imageUrl, redirectDepth = 0) => {
             const chunks = [];
 
             res.on("data", (chunk) => chunks.push(chunk));
+            res.on("error", reject);
             res.on("end", () => {
                 const buffer = Buffer.concat(chunks);
                 if (!buffer || buffer.length === 0) {
@@ -507,7 +509,8 @@ const fetchImageBuffer = async (imageUrl, redirectDepth = 0) => {
             });
         });
 
-        req.on("error", (err) => reject(err));
+        req.setTimeout(15000, () => req.destroy(new Error("Image request timed out")));
+        req.on("error", reject);
         req.end();
     });
 };
