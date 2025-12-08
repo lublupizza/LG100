@@ -263,8 +263,7 @@ const buildMainMenuKeyboard = (includeStart = false) => {
         keyboard.row().textButton({ label: 'Старт', color: 'positive' });
     }
 
-    // Используем строковое представление, чтобы VK гарантированно отобразил все кнопки
-    return keyboard.toString();
+    return keyboard;
 };
 
 const buildStartKeyboard = () => buildMainMenuKeyboard(true);
@@ -505,42 +504,50 @@ const parseBase64DataUri = (dataUri = '', fallbackContentType = 'application/oct
 };
 
 const fetchImageBuffer = async (imageUrl, redirectDepth = 0) => {
-    if (!imageUrl) throw new Error("Image URL not provided");
-    if (redirectDepth > 5) throw new Error("Too many redirects");
+    if (!imageUrl) throw new Error('Image URL not provided');
+    if (redirectDepth > 5) throw new Error('Too many redirects');
 
     return new Promise((resolve, reject) => {
         const currentUrl = new URL(imageUrl);
-        const client = currentUrl.protocol === "https:" ? https : http;
+        const client = currentUrl.protocol === 'https:' ? https : http;
 
         const req = client.get(currentUrl, (res) => {
-            if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-                const loc = res.headers.location;
-                if (!loc) return reject(new Error("Redirect without location header"));
+            try {
+                if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                    const loc = res.headers.location;
+                    if (!loc) return reject(new Error('Redirect without location header'));
 
-                const nextUrl = new URL(loc, currentUrl);
-                return resolve(fetchImageBuffer(nextUrl.toString(), redirectDepth + 1));
-            }
-
-            if (res.statusCode !== 200) {
-                return reject(new Error("Bad status code: " + res.statusCode));
-            }
-
-            const contentType = res.headers["content-type"] || "";
-            const chunks = [];
-
-            res.on("data", (chunk) => chunks.push(chunk));
-            res.on("error", reject);
-            res.on("end", () => {
-                const buffer = Buffer.concat(chunks);
-                if (!buffer || buffer.length === 0) {
-                    return reject(new Error("Empty image buffer"));
+                    const nextUrl = new URL(loc, currentUrl);
+                    return resolve(fetchImageBuffer(nextUrl.toString(), redirectDepth + 1));
                 }
-                resolve({ buffer, contentType });
-            });
+
+                if (res.statusCode !== 200) {
+                    return reject(new Error('Bad status code: ' + res.statusCode));
+                }
+
+                const contentType = res.headers['content-type'] || 'application/octet-stream';
+                const chunks = [];
+
+                res.on('data', (chunk) => chunks.push(chunk));
+                res.on('error', reject);
+                res.on('end', () => {
+                    try {
+                        const buffer = Buffer.concat(chunks);
+                        if (!buffer || buffer.length === 0) {
+                            return reject(new Error('Empty image buffer'));
+                        }
+                        resolve({ buffer, contentType });
+                    } catch (err) {
+                        reject(err);
+                    }
+                });
+            } catch (err) {
+                reject(err);
+            }
         });
 
-        req.setTimeout(15000, () => req.destroy(new Error("Image request timed out")));
-        req.on("error", reject);
+        req.setTimeout(15000, () => req.destroy(new Error('Image request timed out')));
+        req.on('error', reject);
         req.end();
     });
 };
@@ -742,47 +749,62 @@ const uploadCampaignImage = async ({ imageUrl, imageBase64, imageName } = {}) =>
     const cleanUrl = (imageUrl || '').trim();
     const cleanBase64 = (imageBase64 || '').trim();
 
+    const ensureImageType = (contentType = 'application/octet-stream') => {
+        const normalized = (contentType || '').toLowerCase();
+        if (normalized && !normalized.startsWith('image')) {
+            throw new Error(`Invalid content-type for image: ${contentType}`);
+        }
+        return normalized || 'application/octet-stream';
+    };
+
+    let buffer = null;
+    let contentType = 'image/jpeg';
     let filename = imageName || 'campaign.jpg';
 
-    try {
-        // 1. Файл, загруженный с компьютера (base64) — только парсим и возвращаем буфер
-        if (cleanBase64) {
-            const parsed = parseBase64DataUri(cleanBase64, 'image/jpeg');
-            if (parsed?.buffer) {
-                const ext = pickExtension(parsed.contentType || '', filename.split('.').pop() || 'jpg');
-                return {
-                    attachment: null,
-                    buffer: parsed.buffer,
-                    filename: filename.includes('.') ? filename : `campaign.${ext}`,
-                };
-            }
-        }
-
-        // 2. URL — загружаем буфер и сохраняем его для повторного использования, но не создаём общий attachment
-        if (cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
-            if (cachedCampaignPhotoBuffers.has(cleanUrl)) {
-                return { ...cachedCampaignPhotoBuffers.get(cleanUrl) };
-            }
-
-            const fetched = await fetchImageBuffer(cleanUrl);
-            if (fetched?.buffer) {
-                const entry = {
-                    attachment: null,
-                    buffer: fetched.buffer,
-                    filename: `image.${pickExtension(fetched.contentType)}`,
-                };
-                cachedCampaignPhotoBuffers.set(cleanUrl, entry);
-                return entry;
-            }
-        }
-    } catch (err) {
-        console.error('Image processing failed:', err.message || err);
+    // 1. Файл, загруженный с компьютера (base64)
+    if (cleanBase64) {
+        const parsed = parseBase64DataUri(cleanBase64, contentType);
+        buffer = parsed?.buffer || null;
+        contentType = ensureImageType(parsed?.contentType || contentType);
     }
 
-    return null;
+    // 2. URL — скачиваем изображение
+    if (!buffer && cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
+        if (cachedCampaignPhotoBuffers.has(cleanUrl)) {
+            const cached = cachedCampaignPhotoBuffers.get(cleanUrl);
+            buffer = cached.buffer;
+            contentType = ensureImageType(cached.contentType || contentType);
+            filename = cached.filename || filename;
+        } else {
+            const fetched = await fetchImageBuffer(cleanUrl);
+            buffer = fetched?.buffer || null;
+            contentType = ensureImageType(fetched?.contentType || contentType);
+            const entry = {
+                attachment: null,
+                buffer,
+                filename: `image.${pickExtension(contentType)}`,
+                contentType,
+            };
+            cachedCampaignPhotoBuffers.set(cleanUrl, entry);
+            filename = entry.filename;
+        }
+    }
+
+    if (!buffer || buffer.length === 0) {
+        throw new Error('Empty image buffer');
+    }
+
+    const ext = pickExtension(contentType || '', filename.split('.').pop() || 'jpg');
+    const safeFilename = filename.includes('.') ? filename : `campaign.${ext}`;
+
+    return {
+        attachment: null,
+        buffer,
+        filename: safeFilename,
+    };
 };
 
-const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) => {
+const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName, peerId } = {}) => {
     const cleanUrl = (voiceUrl || '').trim();
     const cleanBase64 = (voiceBase64 || '').trim();
     const cacheKey = cleanBase64 ? `data:${cleanBase64.length}:${cleanBase64.slice(0, 32)}` : cleanUrl;
@@ -841,10 +863,12 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName } = {}) =>
 
         let attachment = null;
 
-        try {
-            attachment = await uploadAudioMessageViaDocs({ buffer, filename, contentType });
-        } catch (docsErr) {
-            console.warn('docs audio_message upload errored, fallback to vk.upload.audioMessage', docsErr);
+        if (peerId) {
+            try {
+                attachment = await uploadAudioMessageViaDocs({ buffer, filename, contentType, peerId });
+            } catch (docsErr) {
+                console.warn('docs audio_message upload errored, fallback to vk.upload.audioMessage', docsErr);
+            }
         }
 
         if (!attachment) {
@@ -900,40 +924,34 @@ app.post('/api/campaigns/send', async (req, res) => {
     const requestedImage = requestedImageBase64 ? '' : rawImage;
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
-    const photoResult = await uploadCampaignImage({ imageUrl: requestedImage, imageBase64: requestedImageBase64, imageName });
-    const basePhotoBuffer = photoResult?.buffer;
-    const basePhotoFilename = photoResult?.filename || 'campaign.jpg';
+    let sharedPhotoBuffer = null;
+    let sharedPhotoFilename = 'campaign.jpg';
+    let sharedPhotoAttachment = null;
+
+    if (requestedImage || requestedImageBase64) {
+        try {
+            const photoResult = await uploadCampaignImage({ imageUrl: requestedImage, imageBase64: requestedImageBase64, imageName });
+            sharedPhotoBuffer = photoResult.buffer;
+            sharedPhotoFilename = photoResult.filename || sharedPhotoFilename;
+        } catch (err) {
+            console.error('Image processing failed:', err.message || err);
+            return res.status(400).json({ error: err.message || 'Failed to process image' });
+        }
+    }
+
     const voiceResult = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
     let voiceAttachment = voiceResult?.attachment || null;
     let voiceBuffer = voiceResult?.buffer;
     let voiceFilename = voiceResult?.filename;
 
-    let sharedPhotoBuffer = basePhotoBuffer;
-    let sharedPhotoFilename = basePhotoFilename;
-    let sharedPhotoAttachment = null;
-
-    // Если ни одно вложение не подготовилось, пробуем распарсить base64 повторно или скачать URL
-    if (!sharedPhotoBuffer && requestedImageBase64) {
+    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
         try {
-            const parsedImage = parseBase64DataUri(requestedImageBase64, 'image/jpeg');
-            if (parsedImage?.buffer) {
-                sharedPhotoBuffer = parsedImage.buffer;
-                sharedPhotoFilename = imageName || `campaign.${pickExtension(parsedImage.contentType || 'image/jpeg')}`;
+            const uploadedPhoto = await vk.upload.messagePhoto({ source: { value: sharedPhotoBuffer, filename: sharedPhotoFilename } });
+            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                sharedPhotoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
             }
-        } catch (imgParseErr) {
-            console.warn('Failed to recover image from base64', imgParseErr?.message || imgParseErr);
-        }
-    }
-
-    if (!sharedPhotoBuffer && requestedImage && (requestedImage.startsWith('http://') || requestedImage.startsWith('https://'))) {
-        try {
-            const fetched = await fetchImageBuffer(requestedImage);
-            if (fetched?.buffer) {
-                sharedPhotoBuffer = fetched.buffer;
-                sharedPhotoFilename = `image.${pickExtension(fetched.contentType)}`;
-            }
-        } catch (imgFetchErr) {
-            console.warn('Failed to recover image from URL', imgFetchErr?.message || imgFetchErr);
+        } catch (sharedPhotoErr) {
+            console.warn('Shared photo upload failed', sharedPhotoErr?.message || sharedPhotoErr);
         }
     }
 
