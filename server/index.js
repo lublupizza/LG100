@@ -11,6 +11,7 @@ const { createCanvas } = require('canvas');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
+const multer = require('multer');
 const ffmpegPath = require('ffmpeg-static');
 
 const TOKEN = process.env.VK_TOKEN;
@@ -26,9 +27,27 @@ const vk = new VK({ token: TOKEN });
 const prisma = new PrismaClient();
 const app = express();
 
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, '../dist')));
+app.use('/api', cors(), express.json({ limit: '50mb' }), express.urlencoded({ extended: true }));
+
+// setup multer for image uploads
+const upload = multer({
+    storage: multer.diskStorage({
+        destination: function (req, file, cb) {
+            const uploadPath = path.join(__dirname, 'uploads');
+            if (!fs.existsSync(uploadPath)) {
+                fs.mkdirSync(uploadPath, { recursive: true });
+            }
+            cb(null, uploadPath);
+        },
+        filename: function (req, file, cb) {
+            const ext = path.extname(file.originalname);
+            const name = 'img_' + Date.now() + ext;
+            cb(null, name);
+        }
+    })
+});
 
 // === ГРАФИКА ===
 async function generateBoardImage(board) {
@@ -402,6 +421,17 @@ app.get('/api/games/active/:vkId', async (req, res) => {
     return res.json({ ...game, board: parsedBoard });
 });
 app.get('/api/dashboard', (req, res) => res.json({ kpi: {}, charts: {}, lists: {} }));
+
+// endpoint for uploading campaign images
+app.post('/api/upload', upload.single('file'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const publicUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
+    res.json({ url: publicUrl, filename: req.file.filename, size: req.file.size });
+});
 
 // === Рассылки ===
 const loadRecipients = async () => {
