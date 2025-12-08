@@ -275,11 +275,19 @@ vk.updates.on('message_new', async (ctx) => {
         
         await ctx.send('🎨 Рисую...');
         const buffer = await generateBoardImage(JSON.parse(lastGame.board));
-        const photo = await vk.upload.messagePhoto({ source: { value: buffer } });
-        
+
+        const photo = await vk.upload.messagePhoto({
+            peer_id: ctx.peerId,
+            source: { value: buffer },
+        });
+
+        const attachment = photo?.owner_id && photo?.id
+            ? `photo${photo.owner_id}_${photo.id}${photo.access_key ? '_' + photo.access_key : ''}`
+            : null;
+
         return ctx.send({
             message: `Игра #${lastGame.id}. Победитель: ${user.firstName}`,
-            attachment: photo,
+            attachment: attachment || undefined,
             keyboard: Keyboard.builder().textButton({ label: 'Старт', color: 'positive' }).oneTime()
         });
     }
@@ -466,71 +474,43 @@ const parseBase64DataUri = (dataUri = '', fallbackContentType = 'application/oct
     }
 };
 
-const fetchImageBuffer = (imageUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
-    if (!imageUrl) return reject(new Error('Image URL not provided'));
+const fetchImageBuffer = async (imageUrl, redirectDepth = 0) => {
+    if (!imageUrl) throw new Error("Image URL not provided");
+    if (redirectDepth > 5) throw new Error("Too many redirects");
 
-    try {
-        const url = new URL(imageUrl.trim());
-        const client = url.protocol === 'https:' ? https : http;
+    return new Promise((resolve, reject) => {
+        const url = new URL(imageUrl);
+        const client = url.protocol === "https:" ? https : http;
 
-        const request = client.get({
-            protocol: url.protocol,
-            hostname: url.hostname,
-            port: url.port || undefined,
-            path: url.pathname + (url.search || ''),
-            headers: {
-                'Accept': 'image/*,*/*;q=0.8',
-                'Accept-Encoding': 'identity',
-                'User-Agent': 'PizzaBotCampaign/1.0 (+https://example.com)',
-                'Host': url.hostname,
-            },
-        }, (response) => {
-            if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                if (redirectDepth > 3) return reject(new Error('Too many redirects while fetching image'));
-                const redirectUrl = new URL(response.headers.location, url);
-                return resolve(fetchImageBuffer(redirectUrl.toString(), redirectDepth + 1));
+        const req = client.get(imageUrl, (res) => {
+            // Redirect support
+            if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                const loc = res.headers.location;
+                if (!loc) return reject(new Error("Redirect without location header"));
+                return resolve(fetchImageBuffer(loc, redirectDepth + 1));
             }
 
-            if (response.statusCode !== 200) {
-                return reject(new Error(`Failed to fetch image. Status: ${response.statusCode}`));
+            if (res.statusCode !== 200) {
+                return reject(new Error("Bad status code: " + res.statusCode));
             }
 
-            const contentType = response.headers['content-type'] || '';
-            const encoding = (response.headers['content-encoding'] || 'identity').toLowerCase();
+            const contentType = res.headers["content-type"] || "";
             const chunks = [];
-            response.on('data', (chunk) => chunks.push(chunk));
-            response.on('end', () => {
-                const rawBuffer = Buffer.concat(chunks);
 
-                const finish = (buffer) => resolve({ buffer, contentType });
-
-                if (encoding === 'gzip') {
-                    return zlib.gunzip(rawBuffer, (err, decompressed) => {
-                        if (err) return reject(err);
-                        return finish(decompressed);
-                    });
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => {
+                const buffer = Buffer.concat(chunks);
+                if (!buffer || buffer.length === 0) {
+                    return reject(new Error("Empty image buffer"));
                 }
-
-                if (encoding === 'deflate') {
-                    return zlib.inflate(rawBuffer, (err, decompressed) => {
-                        if (err) return reject(err);
-                        return finish(decompressed);
-                    });
-                }
-
-                return finish(rawBuffer);
+                resolve({ buffer, contentType });
             });
         });
 
-        request.setTimeout(15000, () => {
-            request.destroy(new Error('Image request timed out'));
-        });
-
-        request.on('error', reject);
-    } catch (err) {
-        reject(err);
-    }
-});
+        req.on("error", (err) => reject(err));
+        req.end();
+    });
+};
 
 const fetchAudioBuffer = (audioUrl, redirectDepth = 0) => new Promise((resolve, reject) => {
     if (!audioUrl) return reject(new Error('Audio URL not provided'));
@@ -882,8 +862,9 @@ app.post('/api/campaigns/send', async (req, res) => {
     const audience = filterRecipients(await loadRecipients(), segment, filters);
     if (audience.length === 0) return res.status(400).json({ error: 'No recipients for selected filters' });
 
-    const requestedImage = (imageUrl || image_url || '').trim();
-    const requestedImageBase64 = (imageBase64 || imageBase64Snake || '').trim();
+    const rawImage = (imageUrl || image_url || '').trim();
+    const requestedImageBase64 = (imageBase64 || imageBase64Snake || (rawImage.startsWith('data:') ? rawImage : '')).trim();
+    const requestedImage = requestedImageBase64 ? '' : rawImage;
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
     const photoResult = await uploadCampaignImage({ imageUrl: requestedImage, imageBase64: requestedImageBase64, imageName });
@@ -896,6 +877,7 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     let sharedPhotoBuffer = basePhotoBuffer;
     let sharedPhotoFilename = basePhotoFilename;
+    let sharedPhotoAttachment = null;
 
     // Если ни одно вложение не подготовилось, пробуем распарсить base64 повторно или скачать URL
     if (!sharedPhotoBuffer && requestedImageBase64) {
@@ -919,6 +901,17 @@ app.post('/api/campaigns/send', async (req, res) => {
             }
         } catch (imgFetchErr) {
             console.warn('Failed to recover image from URL', imgFetchErr?.message || imgFetchErr);
+        }
+    }
+
+    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
+        try {
+            const uploadedPhoto = await vk.upload.messagePhoto({ source: { value: sharedPhotoBuffer, filename: sharedPhotoFilename } });
+            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                sharedPhotoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+            }
+        } catch (sharedPhotoErr) {
+            console.warn('Shared photo upload failed', sharedPhotoErr?.message || sharedPhotoErr);
         }
     }
 
@@ -962,11 +955,19 @@ app.post('/api/campaigns/send', async (req, res) => {
             let photoFilename = sharedPhotoFilename;
             const attachments = [];
 
+            if (sharedPhotoAttachment) {
+                attachments.push(sharedPhotoAttachment);
+                photoAttachment = sharedPhotoAttachment;
+                finalPhotoAttachment = sharedPhotoAttachment;
+            }
+
             if (photoBuffer) {
                 try {
-                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
-                    if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                        photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                    if (!photoAttachment) {
+                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                        if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                            photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                        }
                     }
                 } catch (peerPhotoErr) {
                     console.warn('Peer-specific photo upload failed', peerPhotoErr?.message || peerPhotoErr);
@@ -993,7 +994,7 @@ app.post('/api/campaigns/send', async (req, res) => {
             }
 
             if (photoAttachment) {
-                attachments.push(photoAttachment);
+                if (!attachments.includes(photoAttachment)) attachments.push(photoAttachment);
                 finalPhotoAttachment = photoAttachment;
             }
 

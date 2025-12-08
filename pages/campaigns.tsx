@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Campaign, UserSegment, CampaignType, TimePeriod } from '../types';
-import { hydrateCampaigns, launchCampaign, recalculateGameStats } from '../services/campaignService';
+import { hydrateCampaigns, launchCampaign, recalculateGameStats, persistCampaigns } from '../services/campaignService';
 import { getCampaignFunnelForPeriod } from '../services/campaignTrackingService';
 import { Send, Plus, Calendar, Gamepad2, Play, Clock, Eye, Activity, Flame, ChevronRight } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
@@ -91,7 +91,11 @@ const Campaigns: React.FC = () => {
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
     };
-    setCampaigns([camp, ...campaigns]);
+    setCampaigns(prev => {
+      const next = [camp, ...prev];
+      persistCampaigns(next);
+      return next;
+    });
     setIsCreating(false);
     setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '' });
   };
@@ -105,10 +109,18 @@ const Campaigns: React.FC = () => {
           segment_target: campaign.segment_target,
         });
         if (updatedCampaign) {
-            setCampaigns(prev => prev.map(c => c.id === id ? updatedCampaign : c));
+            setCampaigns(prev => {
+              const next = prev.map(c => c.id === id ? updatedCampaign : c);
+              persistCampaigns(next);
+              return next;
+            });
         }
         const hydrated = await hydrateCampaigns();
-        setCampaigns([...hydrated]);
+        setCampaigns(prev => {
+          const next = hydrated.length ? hydrated : prev;
+          persistCampaigns(next);
+          return [...next];
+        });
     }
   };
 
