@@ -275,11 +275,19 @@ vk.updates.on('message_new', async (ctx) => {
         
         await ctx.send('🎨 Рисую...');
         const buffer = await generateBoardImage(JSON.parse(lastGame.board));
-        const photo = await vk.upload.messagePhoto({ source: { value: buffer } });
-        
+
+        const photo = await vk.upload.messagePhoto({
+            peer_id: ctx.peerId,
+            source: { value: buffer },
+        });
+
+        const attachment = photo?.owner_id && photo?.id
+            ? `photo${photo.owner_id}_${photo.id}${photo.access_key ? '_' + photo.access_key : ''}`
+            : null;
+
         return ctx.send({
             message: `Игра #${lastGame.id}. Победитель: ${user.firstName}`,
-            attachment: photo,
+            attachment: attachment || undefined,
             keyboard: Keyboard.builder().textButton({ label: 'Старт', color: 'positive' }).oneTime()
         });
     }
@@ -896,6 +904,7 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     let sharedPhotoBuffer = basePhotoBuffer;
     let sharedPhotoFilename = basePhotoFilename;
+    let sharedPhotoAttachment = null;
 
     // Если ни одно вложение не подготовилось, пробуем распарсить base64 повторно или скачать URL
     if (!sharedPhotoBuffer && requestedImageBase64) {
@@ -919,6 +928,17 @@ app.post('/api/campaigns/send', async (req, res) => {
             }
         } catch (imgFetchErr) {
             console.warn('Failed to recover image from URL', imgFetchErr?.message || imgFetchErr);
+        }
+    }
+
+    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
+        try {
+            const uploadedPhoto = await vk.upload.messagePhoto({ source: { value: sharedPhotoBuffer, filename: sharedPhotoFilename } });
+            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                sharedPhotoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+            }
+        } catch (sharedPhotoErr) {
+            console.warn('Shared photo upload failed', sharedPhotoErr?.message || sharedPhotoErr);
         }
     }
 
@@ -962,11 +982,19 @@ app.post('/api/campaigns/send', async (req, res) => {
             let photoFilename = sharedPhotoFilename;
             const attachments = [];
 
+            if (sharedPhotoAttachment) {
+                attachments.push(sharedPhotoAttachment);
+                photoAttachment = sharedPhotoAttachment;
+                finalPhotoAttachment = sharedPhotoAttachment;
+            }
+
             if (photoBuffer) {
                 try {
-                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
-                    if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                        photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                    if (!photoAttachment) {
+                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                        if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                            photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                        }
                     }
                 } catch (peerPhotoErr) {
                     console.warn('Peer-specific photo upload failed', peerPhotoErr?.message || peerPhotoErr);
@@ -993,7 +1021,7 @@ app.post('/api/campaigns/send', async (req, res) => {
             }
 
             if (photoAttachment) {
-                attachments.push(photoAttachment);
+                if (!attachments.includes(photoAttachment)) attachments.push(photoAttachment);
                 finalPhotoAttachment = photoAttachment;
             }
 
