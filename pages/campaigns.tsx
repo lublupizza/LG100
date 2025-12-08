@@ -31,22 +31,71 @@ const Campaigns: React.FC = () => {
     })();
   }, []);
 
-  const handleImageFile = (file?: File | null) => {
+  const uploadCampaignFile = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!data?.url) {
+      throw new Error('Upload failed: no url returned');
+    }
+
+    return data as { url: string; filename?: string; size?: number };
+  };
+
+  const readFileAsDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error('Failed to read file as data URL'));
+        }
+      };
+      reader.onerror = () => reject(reader.error || new Error('File read error'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleImageFile = async (file?: File | null) => {
     if (!file) {
-      setNewCampaign({ ...newCampaign, imageData: '', imageName: '', imageUrl: newCampaign.imageUrl });
+      setNewCampaign(prev => ({ ...prev, imageData: '', imageName: '', imageUrl: prev.imageUrl }));
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setNewCampaign({
-        ...newCampaign,
-        imageData: typeof reader.result === 'string' ? reader.result : '',
-        imageUrl: '',
+    try {
+      const uploaded = await uploadCampaignFile(file);
+      setNewCampaign(prev => ({
+        ...prev,
+        imageData: '',
+        imageUrl: uploaded.url,
         imageName: file.name,
-      });
-    };
-    reader.readAsDataURL(file);
+      }));
+    } catch (err) {
+      console.error('Image upload failed, fallback to base64', err);
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        setNewCampaign(prev => ({
+          ...prev,
+          imageData: dataUrl,
+          imageUrl: '',
+          imageName: file.name,
+        }));
+      } catch (readErr) {
+        console.error('Failed to read image file', readErr);
+        setNewCampaign(prev => ({ ...prev, imageData: '', imageUrl: '', imageName: '' }));
+      }
+    }
   };
 
   const handleVoiceFile = (file?: File | null) => {
