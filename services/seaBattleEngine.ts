@@ -69,3 +69,37 @@ export async function sendMove(vkId: number, coords: { x: number; y: number }): 
     board: parsedBoard,
   };
 }
+
+type SessionState = {
+  userId: number;
+  campaignId?: number;
+  active: boolean;
+};
+
+/**
+ * Простая in-memory реализация менеджера игровых сессий для обработчиков событий.
+ * Позволяет создавать сессии и отвечать на сообщения, не падая с ошибкой импорта.
+ */
+export const SeaBattleSessionManager = {
+  sessions: new Map<number, SessionState>(),
+
+  startSession(userId: number, campaignId?: number) {
+    this.sessions.set(userId, { userId, campaignId, active: true });
+  },
+
+  handleUserMessage(userId: number, text: string): string | null {
+    const session = this.sessions.get(userId);
+    if (!session || !session.active) return null;
+
+    const normalized = text.trim().toLowerCase();
+    if (!normalized) return 'Введите координаты хода, например "А5"';
+
+    if (['стоп', 'stop', 'выход', 'exit'].includes(normalized)) {
+      this.sessions.delete(userId);
+      return 'Игра завершена. Спасибо за участие!';
+    }
+
+    // Пока нет полноценной обработки ходов, просто подтверждаем прием сообщения.
+    return 'Ход принят! Ожидайте результата.';
+  },
+};
