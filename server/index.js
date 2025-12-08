@@ -955,6 +955,17 @@ app.post('/api/campaigns/send', async (req, res) => {
         }
     }
 
+    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
+        try {
+            const uploadedPhoto = await vk.upload.messagePhoto({ source: { value: sharedPhotoBuffer, filename: sharedPhotoFilename } });
+            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                sharedPhotoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+            }
+        } catch (sharedPhotoErr) {
+            console.warn('Shared photo upload failed', sharedPhotoErr?.message || sharedPhotoErr);
+        }
+    }
+
     if ((requestedVoice || voiceBase64) && !voiceAttachment && !voiceBuffer) {
         try {
             if (voiceBase64) {
