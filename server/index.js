@@ -968,6 +968,7 @@ app.post('/api/campaigns/send', async (req, res) => {
 
         try {
             const uploadedPhoto = await vk.upload.messagePhoto({
+                peer_id: 1,
                 source: {
                     value: sharedPhotoBuffer,
                     filename: sharedPhotoFilename,
@@ -975,6 +976,7 @@ app.post('/api/campaigns/send', async (req, res) => {
             });
 
             console.log("VK PHOTO UPLOAD RESPONSE:", uploadedPhoto);
+            console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
 
             if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
                 sharedPhotoAttachment =
@@ -1050,7 +1052,8 @@ app.post('/api/campaigns/send', async (req, res) => {
             // Загружаем фото под конкретный peer, если есть готовый буфер
             if (!photoAttachment && photoBuffer) {
                 try {
-                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId || 1, source: { value: photoBuffer, filename: photoFilename } });
+                    console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
                     if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
                         photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
                     }
@@ -1068,7 +1071,8 @@ app.post('/api/campaigns/send', async (req, res) => {
                         photoFilename = `image.${pickExtension(fetched.contentType)}`;
                         sharedPhotoBuffer = photoBuffer;
                         sharedPhotoFilename = photoFilename;
-                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId || 1, source: { value: photoBuffer, filename: photoFilename } });
+                        console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
                         if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
                             photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
                         }
