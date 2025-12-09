@@ -272,7 +272,7 @@ const Campaigns: React.FC = () => {
           .map(card => ({
             title: card.title,
             description: card.description,
-            imageUrl: card.imageUrl,
+            image_url: card.imageUrl,
             action: { type: 'open_link', link: card.actionLink },
           }))
       : [];
