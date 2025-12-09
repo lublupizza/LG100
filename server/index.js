@@ -956,6 +956,41 @@ app.post('/api/campaigns/send', async (req, res) => {
         }
     }
 
+    // =========================
+    // UPLOAD PHOTO TO VK (single correct block)
+    // =========================
+    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
+
+        console.log("VK PHOTO UPLOAD: starting…", {
+            filename: sharedPhotoFilename,
+            bufferLength: sharedPhotoBuffer?.length,
+        });
+
+        try {
+            const uploadedPhoto = await vk.upload.messagePhoto({
+                source: {
+                    value: sharedPhotoBuffer,
+                    filename: sharedPhotoFilename,
+                }
+            });
+
+            console.log("VK PHOTO UPLOAD RESPONSE:", uploadedPhoto);
+
+            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                sharedPhotoAttachment =
+                    `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}` +
+                    (uploadedPhoto.access_key ? `_${uploadedPhoto.access_key}` : '');
+
+                console.log("VK PHOTO ATTACH READY:", sharedPhotoAttachment);
+            } else {
+                console.warn("VK PHOTO UPLOAD: no owner_id/id returned");
+            }
+
+        } catch (err) {
+            console.error("VK PHOTO UPLOAD ERROR:", err);
+        }
+    }
+
     const voiceResult = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
     let voiceAttachment = voiceResult?.attachment || null;
     let voiceBuffer = voiceResult?.buffer;
