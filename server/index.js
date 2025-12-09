@@ -931,6 +931,7 @@ app.post('/api/campaigns/send', async (req, res) => {
         voiceName,
         filters = {},
         carousel = [],
+        carouselCards = [],
     } = req.body || {};
 
     const effectiveMessageType = messageType || (type === 'CAROUSEL' ? 'CAROUSEL' : 'DEFAULT');
@@ -948,6 +949,87 @@ app.post('/api/campaigns/send', async (req, res) => {
     const requestedImage = (imageBase64 || imageBase64Snake) ? '' : rawImage;
     console.log("UPLOAD DEBUG:", { rawImage, requestedImageBase64, requestedImage });
     const requestedVoice = (voiceUrl || voice_url || '').trim();
+
+    if (type === 'CAROUSEL') {
+        const carouselCardsArray = Array.isArray(carouselCards) ? carouselCards : [];
+        console.log("CAROUSEL DEBUG:", carouselCardsArray);
+
+        const elements = [];
+
+        for (const card of carouselCardsArray) {
+            const { title, description, imageUrl: cardImageUrl, link } = card || {};
+            if (!cardImageUrl) {
+                console.warn('CAROUSEL WARNING: missing imageUrl for card');
+                continue;
+            }
+
+            try {
+                const fetched = await fetchImageBuffer(cardImageUrl);
+                const buffer = fetched?.buffer;
+                const filename = `carousel_${Date.now()}.${pickExtension(fetched?.contentType || 'image/jpeg')}`;
+
+                if (!buffer || buffer.length === 0) {
+                    console.warn('CAROUSEL WARNING: empty buffer for card');
+                    continue;
+                }
+
+                const uploadedPhoto = await vk.upload.messagePhoto({
+                    source: { value: buffer, filename },
+                });
+                console.log("CAROUSEL PHOTO UPLOAD:", uploadedPhoto);
+
+                if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                    const photo_id = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+
+                    elements.push({
+                        title,
+                        description,
+                        photo_id,
+                        action: { type: 'open_link', link },
+                    });
+                } else {
+                    console.warn('CAROUSEL WARNING: upload returned without owner/id, skipping card');
+                }
+            } catch (cardErr) {
+                console.warn('CAROUSEL WARNING: failed to process card image', cardErr?.message || cardErr);
+            }
+        }
+
+        const carouselObject = {
+            type: 'carousel',
+            elements,
+        };
+
+        console.log("CAROUSEL FINAL OBJECT:", carouselObject);
+
+        let sent = 0;
+        const errors = [];
+
+        for (const user of audience) {
+            try {
+                await vk.api.messages.send({
+                    user_id: user.vkId,
+                    random_id: Date.now(),
+                    attachment: JSON.stringify(carouselObject),
+                });
+                sent += 1;
+            } catch (err) {
+                console.error('Failed to send carousel message', { user: user.vkId, err });
+                errors.push({ user: user.vkId, message: err?.message || 'send_failed' });
+            }
+        }
+
+        return res.json({
+            sent,
+            failed: errors.length,
+            errors,
+            recipients: audience.map((u) => ({
+                vkId: u.vkId,
+                segment: u.segment,
+                games_played: u.games_played,
+            })),
+        });
+    }
 
     let sharedPhotoBuffer = null;
     let sharedPhotoFilename = 'campaign.jpg';
