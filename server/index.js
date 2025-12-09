@@ -1012,6 +1012,18 @@ app.post('/api/campaigns/send', async (req, res) => {
                 photoAttachment = sharedPhotoAttachment;
             }
 
+            // Загружаем фото под конкретный peer, если есть готовый буфер
+            if (!photoAttachment && photoBuffer) {
+                try {
+                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                    if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                        photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                    }
+                } catch (peerPhotoErr) {
+                    console.warn('Peer-specific photo upload failed', peerPhotoErr?.message || peerPhotoErr);
+                }
+            }
+
             // Если буфер отсутствует, но есть валидная ссылка на картинку — скачиваем и пробуем загрузить под конкретного получателя
             if (!photoAttachment && !photoBuffer && requestedImage && (requestedImage.startsWith('http://') || requestedImage.startsWith('https://'))) {
                 try {
