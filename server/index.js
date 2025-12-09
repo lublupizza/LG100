@@ -917,6 +917,8 @@ app.post('/api/campaigns/send', async (req, res) => {
         campaignId,
         message,
         type,
+        messageType,
+        campaignType,
         segment = 'ALL',
         imageUrl,
         image_url,
@@ -928,7 +930,13 @@ app.post('/api/campaigns/send', async (req, res) => {
         voiceBase64,
         voiceName,
         filters = {},
+        carousel = [],
     } = req.body || {};
+
+    const effectiveMessageType = messageType || (type === 'CAROUSEL' ? 'CAROUSEL' : 'DEFAULT');
+    const effectiveCampaignType = campaignType || type;
+    const isCarousel = effectiveMessageType === 'CAROUSEL';
+    const carouselItems = Array.isArray(carousel) ? carousel : [];
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
@@ -945,7 +953,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     let sharedPhotoFilename = 'campaign.jpg';
     let sharedPhotoAttachment = null;
 
-    if (requestedImage || requestedImageBase64) {
+    if (!isCarousel && (requestedImage || requestedImageBase64)) {
         try {
             const photoResult = await uploadCampaignImage({ imageUrl: requestedImage, imageBase64: requestedImageBase64, imageName });
             sharedPhotoBuffer = photoResult.buffer;
@@ -959,7 +967,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     // =========================
     // UPLOAD PHOTO TO VK (single correct block)
     // =========================
-    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
+    if (!isCarousel && sharedPhotoBuffer && !sharedPhotoAttachment) {
 
         console.log("VK PHOTO UPLOAD: starting…", {
             filename: sharedPhotoFilename,
@@ -1023,7 +1031,7 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     for (const user of audience) {
         try {
-            const intro = type === 'GAME_BATTLESHIP'
+            const intro = effectiveCampaignType === 'GAME_BATTLESHIP'
                 ? `${message}\n\n🏴‍☠️ Начни игру: напиши "Старт" или координату (например A1)`
                 : message;
 
@@ -1032,6 +1040,64 @@ app.post('/api/campaigns/send', async (req, res) => {
                 random_id: Date.now() + Math.floor(Math.random() * 100000),
                 message: intro,
             };
+
+            if (isCarousel) {
+                const elements = [];
+                for (const card of carouselItems) {
+                    const base64 = (card?.imageBase64 || card?.image_base64 || '').trim();
+                    if (!base64) continue;
+                    let parsed = null;
+                    try {
+                        parsed = parseBase64DataUri(base64, 'image/jpeg');
+                    } catch (parseErr) {
+                        console.warn('Failed to parse carousel image', parseErr?.message || parseErr);
+                        continue;
+                    }
+
+                    const buffer = parsed?.buffer;
+                    const filename = parsed?.filename || card?.imageName || 'carousel.jpg';
+                    if (!buffer) continue;
+
+                    try {
+                        const uploadedPhoto = await vk.upload.messagePhoto({
+                            peer_id: user.vkId,
+                            source: { value: buffer, filename },
+                        });
+                        console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
+                        if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                            const photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                            elements.push({
+                                title: card?.title || '',
+                                description: card?.description || '',
+                                photo_id: photoAttachment,
+                                action: {
+                                    type: 'open_link',
+                                    link: card?.buttonLink || '',
+                                },
+                                buttons: [
+                                    {
+                                        action: {
+                                            type: 'open_link',
+                                            label: card?.buttonLabel || 'Открыть',
+                                            link: card?.buttonLink || '',
+                                        }
+                                    }
+                                ],
+                            });
+                        }
+                    } catch (carouselUploadErr) {
+                        console.warn('Carousel photo upload failed', carouselUploadErr?.message || carouselUploadErr);
+                    }
+                }
+
+                if (elements.length > 0) {
+                    payload.template = JSON.stringify({ type: 'carousel', elements });
+                }
+
+                await vk.api.messages.send(payload);
+                sent += 1;
+                continue;
+            }
 
             let photoAttachment = null;
             let photoBuffer = sharedPhotoBuffer;
