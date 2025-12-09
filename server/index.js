@@ -967,21 +967,21 @@ app.post('/api/campaigns/send', async (req, res) => {
         });
 
         try {
-            const uploadedPhoto = await vk.upload.messagePhoto({
-                peer_id: 1,
-                source: {
-                    value: sharedPhotoBuffer,
-                    filename: sharedPhotoFilename,
-                }
-            });
+            const uploadServer = await vk.api.photos.getMessagesUploadServer({ peer_id: 1 });
+            console.log("VK PHOTO UPLOAD SERVER:", uploadServer);
 
-            console.log("VK PHOTO UPLOAD RESPONSE:", uploadedPhoto);
-            console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
+            const form = new FormData();
+            form.append('photo', new Blob([sharedPhotoBuffer]), sharedPhotoFilename);
 
-            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                sharedPhotoAttachment =
-                    `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}` +
-                    (uploadedPhoto.access_key ? `_${uploadedPhoto.access_key}` : '');
+            const uploadResponse = await fetch(uploadServer?.upload_url, { method: 'POST', body: form });
+            const uploadJson = await uploadResponse.json();
+            console.log("VK PHOTO UPLOAD RESPONSE:", uploadJson);
+
+            const saved = await vk.api.photos.saveMessagesPhoto(uploadJson);
+            console.log("PHOTO UPLOAD RESULT", saved);
+
+            if (saved?.[0]?.owner_id && saved?.[0]?.id) {
+                sharedPhotoAttachment = `photo${saved[0].owner_id}_${saved[0].id}`;
 
                 console.log("VK PHOTO ATTACH READY:", sharedPhotoAttachment);
             } else {
@@ -1052,10 +1052,21 @@ app.post('/api/campaigns/send', async (req, res) => {
             // Загружаем фото под конкретный peer, если есть готовый буфер
             if (!photoAttachment && photoBuffer) {
                 try {
-                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId || 1, source: { value: photoBuffer, filename: photoFilename } });
-                    console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
-                    if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                        photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                    const uploadServer = await vk.api.photos.getMessagesUploadServer({ peer_id: user.vkId });
+                    console.log("VK PHOTO UPLOAD SERVER:", uploadServer);
+
+                    const form = new FormData();
+                    form.append('photo', new Blob([photoBuffer]), photoFilename);
+
+                    const uploadResponse = await fetch(uploadServer?.upload_url, { method: 'POST', body: form });
+                    const uploadJson = await uploadResponse.json();
+                    console.log("VK PHOTO UPLOAD RESPONSE:", uploadJson);
+
+                    const saved = await vk.api.photos.saveMessagesPhoto(uploadJson);
+                    console.log("PHOTO UPLOAD RESULT", saved);
+
+                    if (saved?.[0]?.owner_id && saved?.[0]?.id) {
+                        photoAttachment = `photo${saved[0].owner_id}_${saved[0].id}`;
                     }
                 } catch (peerPhotoErr) {
                     console.warn('Peer-specific photo upload failed', peerPhotoErr?.message || peerPhotoErr);
@@ -1071,10 +1082,21 @@ app.post('/api/campaigns/send', async (req, res) => {
                         photoFilename = `image.${pickExtension(fetched.contentType)}`;
                         sharedPhotoBuffer = photoBuffer;
                         sharedPhotoFilename = photoFilename;
-                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId || 1, source: { value: photoBuffer, filename: photoFilename } });
-                        console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
-                        if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                            photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
+                        const uploadServer = await vk.api.photos.getMessagesUploadServer({ peer_id: user.vkId });
+                        console.log("VK PHOTO UPLOAD SERVER:", uploadServer);
+
+                        const form = new FormData();
+                        form.append('photo', new Blob([photoBuffer]), photoFilename);
+
+                        const uploadResponse = await fetch(uploadServer?.upload_url, { method: 'POST', body: form });
+                        const uploadJson = await uploadResponse.json();
+                        console.log("VK PHOTO UPLOAD RESPONSE:", uploadJson);
+
+                        const saved = await vk.api.photos.saveMessagesPhoto(uploadJson);
+                        console.log("PHOTO UPLOAD RESULT", saved);
+
+                        if (saved?.[0]?.owner_id && saved?.[0]?.id) {
+                            photoAttachment = `photo${saved[0].owner_id}_${saved[0].id}`;
                         }
                     }
                 } catch (latePhotoErr) {
