@@ -292,7 +292,7 @@ const Campaigns: React.FC = () => {
       carouselCards: carouselPayload,
     };
 
-    console.log('SENDING CAROUSEL:', carouselPayload);
+    console.log('SENDING PAYLOAD:', payload);
 
     try {
       await fetch('/api/campaigns/send', {
