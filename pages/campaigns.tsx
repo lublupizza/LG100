@@ -6,14 +6,26 @@ import { getCampaignFunnelForPeriod } from '../services/campaignTrackingService'
 import { Send, Plus, Calendar, Gamepad2, Play, Clock, Eye, Activity, Flame, ChevronRight } from 'lucide-react';
 import { isDateInPeriod } from '../utils/dateHelpers';
 
+type MessageType = 'DEFAULT' | 'CAROUSEL';
+
+type CarouselCard = {
+  imageBase64: string;
+  title: string;
+  description: string;
+  buttonLabel: string;
+  buttonLink: string;
+  imageName?: string;
+};
+
 const Campaigns: React.FC = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [period, setPeriod] = useState<TimePeriod>('7d');
-  
+
   const [isCreating, setIsCreating] = useState(false);
   const [newCampaign, setNewCampaign] = useState({
     name: '',
-    type: CampaignType.STANDARD,
+    type: 'DEFAULT' as MessageType,
+    campaignType: CampaignType.STANDARD,
     segment: 'ALL',
     message: '',
     imageUrl: '',
@@ -22,6 +34,7 @@ const Campaigns: React.FC = () => {
     voiceUrl: '',
     voiceData: '',
     voiceName: '',
+    carousel: [] as CarouselCard[],
   });
 
   useEffect(() => {
@@ -69,7 +82,12 @@ const Campaigns: React.FC = () => {
 
   const handleImageFile = async (file?: File | null) => {
     if (!file) {
-      setNewCampaign(prev => ({ ...prev, imageData: '', imageName: '', imageUrl: prev.imageUrl }));
+      setNewCampaign(prev => ({
+        ...prev,
+        imageData: '',
+        imageName: '',
+        imageUrl: prev.imageUrl
+      }));
       return;
     }
 
@@ -93,7 +111,12 @@ const Campaigns: React.FC = () => {
         }));
       } catch (readErr) {
         console.error('Failed to read image file', readErr);
-        setNewCampaign(prev => ({ ...prev, imageData: '', imageUrl: '', imageName: '' }));
+        setNewCampaign(prev => ({
+          ...prev,
+          imageData: '',
+          imageUrl: '',
+          imageName: ''
+        }));
       }
     }
   };
@@ -116,37 +139,77 @@ const Campaigns: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  const handleCarouselFiles = async (files?: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const items = await Promise.all(Array.from(files).map(async (file) => {
+      const dataUrl = await readFileAsDataUrl(file);
+      return {
+        imageBase64: dataUrl,
+        title: '',
+        description: '',
+        buttonLabel: '',
+        buttonLink: '',
+        imageName: file.name,
+      } as CarouselCard;
+    }));
+
+    setNewCampaign(prev => ({
+      ...prev,
+      carousel: [...prev.carousel, ...items],
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedImage = newCampaign.imageUrl.trim();
-    const normalizedImage = (newCampaign.imageData && newCampaign.imageData.trim()) || trimmedImage || undefined;
-    const voiceSource = (newCampaign.voiceData || newCampaign.voiceUrl).trim();
-    const normalizedVoice = voiceSource || undefined;
+
+    const trimmedImageUrl = newCampaign.imageUrl.trim();
+    const imageBase64 = (newCampaign.imageData || '').trim();
+    const imageUrl = imageBase64 ? '' : trimmedImageUrl;
+
+    const voiceBase64 = (newCampaign.voiceData || '').trim();
+    const voiceUrl = voiceBase64 ? '' : newCampaign.voiceUrl.trim();
+
+    const isCarousel = newCampaign.type === 'CAROUSEL';
+    const carouselPayload = isCarousel
+      ? newCampaign.carousel
+          .filter(card => !!card.imageBase64)
+          .map(card => ({
+            imageBase64: card.imageBase64,
+            title: card.title,
+            description: card.description,
+            buttonLabel: card.buttonLabel,
+            buttonLink: card.buttonLink,
+          }))
+      : [];
+
     const camp: Campaign = {
         id: `c${Date.now()}`,
         name: newCampaign.name,
-        type: newCampaign.type,
+        type: newCampaign.campaignType,
         segment_target: newCampaign.segment as UserSegment | 'ALL',
         message: newCampaign.message,
-        image_url: newCampaign.imageData ? undefined : (normalizedImage || undefined),
-        image_base64: newCampaign.imageData || undefined,
-        image_name: newCampaign.imageName || undefined,
-        // Дублируем для обратной совместимости с разными полями
-        ...(normalizedImage ? { imageUrl: normalizedImage } : { imageUrl: undefined } as any),
-        voice_url: normalizedVoice,
-        voice_base64: newCampaign.voiceData || undefined,
+        image_url: isCarousel ? undefined : (imageUrl || undefined),
+        image_base64: isCarousel ? undefined : (imageBase64 || undefined),
+        image_name: isCarousel ? undefined : (newCampaign.imageName || undefined),
+        voice_url: voiceUrl || undefined,
+        voice_base64: voiceBase64 || undefined,
         voice_name: newCampaign.voiceName || undefined,
         status: 'SCHEDULED',
         stats: { sent: 0, delivered: 0, clicked: 0 },
         created_at: new Date().toISOString()
-    };
+    } as Campaign;
+    const campWithExtras = {
+      ...camp,
+      message_type: newCampaign.type,
+      carousel: carouselPayload,
+    } as Campaign & { message_type: MessageType; carousel?: typeof carouselPayload };
     setCampaigns(prev => {
-      const next = [camp, ...prev];
+      const next = [campWithExtras as any, ...prev];
       persistCampaigns(next);
       return next;
     });
     setIsCreating(false);
-    setNewCampaign({ name: '', type: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '' });
+    setNewCampaign({ name: '', type: 'DEFAULT', campaignType: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '', carousel: [] });
   };
 
   const handleLaunch = async (id: string) => {
@@ -235,7 +298,7 @@ const Campaigns: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Название</label>
-                <input 
+                <input
                   required
                   type="text" 
                   className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
@@ -246,13 +309,24 @@ const Campaigns: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Тип кампании</label>
-                <select 
+                <select
                   className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
-                  value={newCampaign.type}
-                  onChange={e => setNewCampaign({...newCampaign, type: e.target.value as CampaignType})}
+                  value={newCampaign.campaignType}
+                  onChange={e => setNewCampaign({...newCampaign, campaignType: e.target.value as CampaignType})}
                 >
                   <option value={CampaignType.STANDARD}>Обычная (Текст/Картинка)</option>
                   <option value={CampaignType.GAME_BATTLESHIP}>Игровая (Морской Бой)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Тип сообщения</label>
+                <select
+                  className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
+                  value={newCampaign.type}
+                  onChange={e => setNewCampaign({ ...newCampaign, type: e.target.value as MessageType })}
+                >
+                  <option value="DEFAULT">Обычное сообщение</option>
+                  <option value="CAROUSEL">Карусель</option>
                 </select>
               </div>
             </div>
@@ -273,7 +347,7 @@ const Campaigns: React.FC = () => {
 
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  {newCampaign.type === CampaignType.GAME_BATTLESHIP ? 'Стартовое сообщение игры' : 'Текст сообщения'}
+                  {newCampaign.campaignType === CampaignType.GAME_BATTLESHIP ? 'Стартовое сообщение игры' : 'Текст сообщения'}
               </label>
               <textarea
                 required
@@ -281,11 +355,11 @@ const Campaigns: React.FC = () => {
                 className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all resize-none"
                 value={newCampaign.message}
                 onChange={e => setNewCampaign({...newCampaign, message: e.target.value})}
-                placeholder={newCampaign.type === CampaignType.GAME_BATTLESHIP ? "Капитан, враг на горизонте! Пиши A1 чтобы стрелять..." : "Текст..."}
+                placeholder={newCampaign.campaignType === CampaignType.GAME_BATTLESHIP ? "Капитан, враг на горизонте! Пиши A1 чтобы стрелять..." : "Текст..."}
               />
             </div>
 
-            {newCampaign.type === CampaignType.STANDARD && (
+            {newCampaign.campaignType === CampaignType.STANDARD && newCampaign.type === 'DEFAULT' && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
                 <div className="md:col-span-2 space-y-5">
                   <div>
@@ -378,6 +452,93 @@ const Campaigns: React.FC = () => {
                     />
                   )}
                 </div>
+              </div>
+            )}
+
+            {newCampaign.type === 'CAROUSEL' && (
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-700">Карусель: загрузите изображения</label>
+                  <label className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm text-sm font-semibold cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => handleCarouselFiles(e.target.files)}
+                    />
+                    Загрузить изображения
+                  </label>
+                  <p className="text-xs text-gray-500">Добавьте одну или несколько картинок для карусели.</p>
+                </div>
+
+                {newCampaign.carousel.length > 0 && (
+                  <div className="space-y-4">
+                    {newCampaign.carousel.map((card, idx) => (
+                      <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-semibold text-gray-700">Карточка #{idx + 1}</div>
+                          {card.imageName && <span className="text-xs text-gray-500">{card.imageName}</span>}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Заголовок</label>
+                            <input
+                              type="text"
+                              value={card.title}
+                              onChange={(e) => {
+                                const carousel = [...newCampaign.carousel];
+                                carousel[idx] = { ...carousel[idx], title: e.target.value };
+                                setNewCampaign({ ...newCampaign, carousel });
+                              }}
+                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Описание</label>
+                            <input
+                              type="text"
+                              value={card.description}
+                              onChange={(e) => {
+                                const carousel = [...newCampaign.carousel];
+                                carousel[idx] = { ...carousel[idx], description: e.target.value };
+                                setNewCampaign({ ...newCampaign, carousel });
+                              }}
+                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Текст кнопки</label>
+                            <input
+                              type="text"
+                              value={card.buttonLabel}
+                              onChange={(e) => {
+                                const carousel = [...newCampaign.carousel];
+                                carousel[idx] = { ...carousel[idx], buttonLabel: e.target.value };
+                                setNewCampaign({ ...newCampaign, carousel });
+                              }}
+                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Ссылка кнопки</label>
+                            <input
+                              type="url"
+                              value={card.buttonLink}
+                              onChange={(e) => {
+                                const carousel = [...newCampaign.carousel];
+                                carousel[idx] = { ...carousel[idx], buttonLink: e.target.value };
+                                setNewCampaign({ ...newCampaign, carousel });
+                              }}
+                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                              placeholder="https://example.com"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
