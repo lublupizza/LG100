@@ -14,7 +14,6 @@ type CarouselCard = {
   description: string;
   buttonLabel: string;
   buttonLink: string;
-  imageName?: string;
 };
 
 const Campaigns: React.FC = () => {
@@ -22,6 +21,14 @@ const Campaigns: React.FC = () => {
   const [period, setPeriod] = useState<TimePeriod>('7d');
 
   const [isCreating, setIsCreating] = useState(false);
+  const createBlankCarouselCard = (): CarouselCard => ({
+    imageBase64: '',
+    title: '',
+    description: '',
+    buttonLabel: '',
+    buttonLink: '',
+  });
+
   const [newCampaign, setNewCampaign] = useState({
     name: '',
     type: 'DEFAULT' as MessageType,
@@ -77,6 +84,44 @@ const Campaigns: React.FC = () => {
       };
       reader.onerror = () => reject(reader.error || new Error('File read error'));
       reader.readAsDataURL(file);
+    });
+  };
+
+  const validateCarouselImage = async (file: File): Promise<string> => {
+    const dataUrl = await readFileAsDataUrl(file);
+
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        const { width, height } = image;
+        const minWidth = 221;
+        const minHeight = 136;
+        const targetRatio = 13 / 8;
+        const tolerance = 0.02;
+        const ratio = width / height;
+        const lowerBound = targetRatio * (1 - tolerance);
+        const upperBound = targetRatio * (1 + tolerance);
+
+        if (width < minWidth || height < minHeight) {
+          alert('Картинка слишком маленькая. Минимум 221x136 пикселей.');
+          reject(new Error('Image resolution too low'));
+          return;
+        }
+
+        if (ratio < lowerBound || ratio > upperBound) {
+          alert('Соотношение сторон должно быть 13:8 (±2%).');
+          reject(new Error('Invalid aspect ratio'));
+          return;
+        }
+
+        resolve(dataUrl);
+      };
+
+      image.onerror = () => {
+        reject(new Error('Не удалось загрузить изображение для проверки.'));
+      };
+
+      image.src = dataUrl;
     });
   };
 
@@ -139,24 +184,60 @@ const Campaigns: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleCarouselFiles = async (files?: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const items = await Promise.all(Array.from(files).map(async (file) => {
-      const dataUrl = await readFileAsDataUrl(file);
-      return {
-        imageBase64: dataUrl,
-        title: '',
-        description: '',
-        buttonLabel: '',
-        buttonLink: '',
-        imageName: file.name,
-      } as CarouselCard;
-    }));
+  const handleAddCarouselCard = () => {
+    setNewCampaign(prev => {
+      if (prev.carousel.length >= 3) {
+        alert('Карусель может содержать не более 3 карточек.');
+        return prev;
+      }
+      return { ...prev, carousel: [...prev.carousel, createBlankCarouselCard()] };
+    });
+  };
 
-    setNewCampaign(prev => ({
-      ...prev,
-      carousel: [...prev.carousel, ...items],
-    }));
+  const handleRemoveCarouselCard = (index: number) => {
+    setNewCampaign(prev => {
+      const carousel = prev.carousel.filter((_, idx) => idx !== index);
+      return { ...prev, carousel };
+    });
+  };
+
+  const handleCarouselImageChange = async (index: number, file?: File | null) => {
+    if (!file) return;
+    try {
+      const dataUrl = await validateCarouselImage(file);
+      setNewCampaign(prev => {
+        const carousel = [...prev.carousel];
+        carousel[index] = { ...carousel[index], imageBase64: dataUrl };
+        return { ...prev, carousel };
+      });
+    } catch (err) {
+      console.warn('Carousel image validation failed', err);
+    }
+  };
+
+  const handleCarouselFieldChange = (index: number, field: keyof CarouselCard, value: string) => {
+    setNewCampaign(prev => {
+      const carousel = [...prev.carousel];
+      carousel[index] = { ...carousel[index], [field]: value } as CarouselCard;
+      return { ...prev, carousel };
+    });
+  };
+
+  const handleMessageTypeChange = (value: MessageType) => {
+    setNewCampaign(prev => {
+      let nextCarousel = prev.carousel;
+      if (value === 'CAROUSEL') {
+        if (nextCarousel.length < 2) {
+          nextCarousel = [...nextCarousel];
+          while (nextCarousel.length < 2) {
+            nextCarousel.push(createBlankCarouselCard());
+          }
+        }
+        nextCarousel = nextCarousel.slice(0, 3);
+      }
+
+      return { ...prev, type: value, carousel: nextCarousel };
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -170,16 +251,29 @@ const Campaigns: React.FC = () => {
     const voiceUrl = voiceBase64 ? '' : newCampaign.voiceUrl.trim();
 
     const isCarousel = newCampaign.type === 'CAROUSEL';
+    if (isCarousel) {
+      if (newCampaign.carousel.length < 2) {
+        alert('Добавьте минимум 2 карточки для карусели.');
+        return;
+      }
+      if (newCampaign.carousel.length > 3) {
+        alert('Максимум 3 карточки в карусели.');
+        return;
+      }
+      if (newCampaign.carousel.some(card => !card.imageBase64)) {
+        alert('У каждой карточки должна быть загружена картинка.');
+        return;
+      }
+    }
+
     const carouselPayload = isCarousel
-      ? newCampaign.carousel
-          .filter(card => !!card.imageBase64)
-          .map(card => ({
-            imageBase64: card.imageBase64,
-            title: card.title,
-            description: card.description,
-            buttonLabel: card.buttonLabel,
-            buttonLink: card.buttonLink,
-          }))
+      ? newCampaign.carousel.map(card => ({
+          imageBase64: card.imageBase64,
+          title: card.title,
+          description: card.description,
+          buttonLabel: card.buttonLabel,
+          buttonLink: card.buttonLink,
+        }))
       : [];
 
     const camp: Campaign = {
@@ -323,10 +417,10 @@ const Campaigns: React.FC = () => {
                 <select
                   className="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none transition-all"
                   value={newCampaign.type}
-                  onChange={e => setNewCampaign({ ...newCampaign, type: e.target.value as MessageType })}
+                  onChange={e => handleMessageTypeChange(e.target.value as MessageType)}
                 >
-                  <option value="DEFAULT">Обычное сообщение</option>
-                  <option value="CAROUSEL">Карусель</option>
+                  <option value="DEFAULT">Обычная рассылка</option>
+                  <option value="CAROUSEL">Карусель (2–3 карточки)</option>
                 </select>
               </div>
             </div>
@@ -456,20 +550,20 @@ const Campaigns: React.FC = () => {
             )}
 
             {newCampaign.type === 'CAROUSEL' && (
-              <div className="space-y-5">
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-700">Карусель: загрузите изображения</label>
-                  <label className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm text-sm font-semibold cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => handleCarouselFiles(e.target.files)}
-                    />
-                    Загрузить изображения
-                  </label>
-                  <p className="text-xs text-gray-500">Добавьте одну или несколько картинок для карусели.</p>
+              <div className="space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700">Карусель сообщений</label>
+                    <p className="text-xs text-gray-500">Добавьте 2–3 карточки с обложкой 13:8 (минимум 221x136).</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddCarouselCard}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-50"
+                    disabled={newCampaign.carousel.length >= 3}
+                  >
+                    <Plus size={16} /> Добавить карточку
+                  </button>
                 </div>
 
                 {newCampaign.carousel.length > 0 && (
@@ -478,61 +572,71 @@ const Campaigns: React.FC = () => {
                       <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-semibold text-gray-700">Карточка #{idx + 1}</div>
-                          {card.imageName && <span className="text-xs text-gray-500">{card.imageName}</span>}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCarouselCard(idx)}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            Удалить
+                          </button>
                         </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Заголовок</label>
-                            <input
-                              type="text"
-                              value={card.title}
-                              onChange={(e) => {
-                                const carousel = [...newCampaign.carousel];
-                                carousel[idx] = { ...carousel[idx], title: e.target.value };
-                                setNewCampaign({ ...newCampaign, carousel });
-                              }}
-                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
-                            />
+                          <div className="space-y-2">
+                            <label className="block text-xs font-semibold text-gray-600">Загрузить картинку 13:8</label>
+                            <label className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm text-sm font-semibold cursor-pointer hover:bg-gray-50 w-full md:w-auto">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => handleCarouselImageChange(idx, e.target.files?.[0])}
+                              />
+                              Загрузить изображение
+                            </label>
+                            {card.imageBase64 && (
+                              <img src={card.imageBase64} alt={`Carousel ${idx + 1}`} className="h-28 w-full md:w-48 object-cover rounded border border-gray-200" />
+                            )}
+                            <p className="text-[11px] text-gray-500">Соотношение сторон 13:8, допуск ±2%, минимум 221x136 px.</p>
                           </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Описание</label>
-                            <input
-                              type="text"
-                              value={card.description}
-                              onChange={(e) => {
-                                const carousel = [...newCampaign.carousel];
-                                carousel[idx] = { ...carousel[idx], description: e.target.value };
-                                setNewCampaign({ ...newCampaign, carousel });
-                              }}
-                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Текст кнопки</label>
-                            <input
-                              type="text"
-                              value={card.buttonLabel}
-                              onChange={(e) => {
-                                const carousel = [...newCampaign.carousel];
-                                carousel[idx] = { ...carousel[idx], buttonLabel: e.target.value };
-                                setNewCampaign({ ...newCampaign, carousel });
-                              }}
-                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Ссылка кнопки</label>
-                            <input
-                              type="url"
-                              value={card.buttonLink}
-                              onChange={(e) => {
-                                const carousel = [...newCampaign.carousel];
-                                carousel[idx] = { ...carousel[idx], buttonLink: e.target.value };
-                                setNewCampaign({ ...newCampaign, carousel });
-                              }}
-                              className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
-                              placeholder="https://example.com"
-                            />
+
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Название</label>
+                              <input
+                                type="text"
+                                value={card.title}
+                                onChange={(e) => handleCarouselFieldChange(idx, 'title', e.target.value)}
+                                className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Описание</label>
+                              <input
+                                type="text"
+                                value={card.description}
+                                onChange={(e) => handleCarouselFieldChange(idx, 'description', e.target.value)}
+                                className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Текст кнопки</label>
+                              <input
+                                type="text"
+                                value={card.buttonLabel}
+                                onChange={(e) => handleCarouselFieldChange(idx, 'buttonLabel', e.target.value)}
+                                className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Ссылка кнопки</label>
+                              <input
+                                type="url"
+                                value={card.buttonLink}
+                                onChange={(e) => handleCarouselFieldChange(idx, 'buttonLink', e.target.value)}
+                                className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
+                                placeholder="https://example.com"
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
