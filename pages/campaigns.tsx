@@ -323,8 +323,8 @@ const Campaigns: React.FC = () => {
     const campWithExtras = {
       ...camp,
       message_type: newCampaign.type,
-      carousel: carouselPayload,
-    } as Campaign & { message_type: MessageType; carousel?: typeof carouselPayload };
+      carouselCards: carouselPayload,
+    } as Campaign & { message_type: MessageType; carouselCards?: typeof carouselPayload };
     setCampaigns(prev => {
       const next = [campWithExtras as any, ...prev];
       persistCampaigns(next);

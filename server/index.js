@@ -937,7 +937,7 @@ app.post('/api/campaigns/send', async (req, res) => {
     const effectiveMessageType = messageType || (type === 'CAROUSEL' ? 'CAROUSEL' : 'DEFAULT');
     const effectiveCampaignType = campaignType || type;
     const isCarousel = effectiveMessageType === 'CAROUSEL';
-    const carouselItems = Array.isArray(carousel) ? carousel : [];
+    const carouselItems = Array.isArray(carouselCards) ? carouselCards : (Array.isArray(carousel) ? carousel : []);
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
@@ -952,7 +952,7 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     // === FIXED VK CAROUSEL SUPPORT ===
     if (type === 'CAROUSEL') {
-        const carouselArray = Array.isArray(carousel) ? carousel : [];
+        const carouselArray = Array.isArray(carouselCards) ? carouselCards : (Array.isArray(carousel) ? carousel : []);
         console.log("CAROUSEL DEBUG:", carouselArray);
 
         const elements = [];
