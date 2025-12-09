@@ -9,11 +9,10 @@ import { isDateInPeriod } from '../utils/dateHelpers';
 type MessageType = 'DEFAULT' | 'CAROUSEL';
 
 type CarouselCard = {
-  imageBase64: string;
+  imageUrl: string;
   title: string;
   description: string;
-  buttonLabel: string;
-  buttonLink: string;
+  link: string;
 };
 
 const Campaigns: React.FC = () => {
@@ -22,11 +21,10 @@ const Campaigns: React.FC = () => {
 
   const [isCreating, setIsCreating] = useState(false);
   const createBlankCarouselCard = (): CarouselCard => ({
-    imageBase64: '',
+    imageUrl: '',
     title: '',
     description: '',
-    buttonLabel: '',
-    buttonLink: '',
+    link: '',
   });
 
   const [newCampaign, setNewCampaign] = useState({
@@ -204,14 +202,15 @@ const Campaigns: React.FC = () => {
   const handleCarouselImageChange = async (index: number, file?: File | null) => {
     if (!file) return;
     try {
-      const dataUrl = await validateCarouselImage(file);
+      const uploaded = await uploadCampaignFile(file);
       setNewCampaign(prev => {
         const carousel = [...prev.carousel];
-        carousel[index] = { ...carousel[index], imageBase64: dataUrl };
+        carousel[index] = { ...carousel[index], imageUrl: uploaded.url };
         return { ...prev, carousel };
       });
     } catch (err) {
-      console.warn('Carousel image validation failed', err);
+      console.error('Carousel image upload failed', err);
+      alert('Не удалось загрузить картинку. Попробуйте другой файл.');
     }
   };
 
@@ -227,13 +226,12 @@ const Campaigns: React.FC = () => {
     setNewCampaign(prev => {
       let nextCarousel = prev.carousel;
       if (value === 'CAROUSEL') {
-        if (nextCarousel.length < 2) {
-          nextCarousel = [...nextCarousel];
-          while (nextCarousel.length < 2) {
-            nextCarousel.push(createBlankCarouselCard());
-          }
+        if (nextCarousel.length === 0) {
+          nextCarousel = [createBlankCarouselCard()];
         }
         nextCarousel = nextCarousel.slice(0, 3);
+      } else {
+        nextCarousel = [];
       }
 
       return { ...prev, type: value, carousel: nextCarousel };
@@ -252,27 +250,26 @@ const Campaigns: React.FC = () => {
 
     const isCarousel = newCampaign.type === 'CAROUSEL';
     if (isCarousel) {
-      if (newCampaign.carousel.length < 2) {
-        alert('Добавьте минимум 2 карточки для карусели.');
+      if (newCampaign.carousel.length < 1) {
+        alert('Добавьте минимум 1 карточку для карусели.');
         return;
       }
       if (newCampaign.carousel.length > 3) {
         alert('Максимум 3 карточки в карусели.');
         return;
       }
-      if (newCampaign.carousel.some(card => !card.imageBase64)) {
-        alert('У каждой карточки должна быть загружена картинка.');
+      if (newCampaign.carousel.some(card => !card.imageUrl.trim() || !card.title.trim())) {
+        alert('Каждая карточка должна содержать изображение и заголовок.');
         return;
       }
     }
 
     const carouselPayload = isCarousel
       ? newCampaign.carousel.map(card => ({
-          imageBase64: card.imageBase64,
+          imageUrl: card.imageUrl,
           title: card.title,
           description: card.description,
-          buttonLabel: card.buttonLabel,
-          buttonLink: card.buttonLink,
+          link: card.link,
         }))
       : [];
 
@@ -420,7 +417,7 @@ const Campaigns: React.FC = () => {
                   onChange={e => handleMessageTypeChange(e.target.value as MessageType)}
                 >
                   <option value="DEFAULT">Обычная рассылка</option>
-                  <option value="CAROUSEL">Карусель (2–3 карточки)</option>
+                  <option value="CAROUSEL">Карусель (1–3 карточки)</option>
                 </select>
               </div>
             </div>
@@ -583,7 +580,7 @@ const Campaigns: React.FC = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div className="space-y-2">
-                            <label className="block text-xs font-semibold text-gray-600">Загрузить картинку 13:8</label>
+                            <label className="block text-xs font-semibold text-gray-600">Загрузить картинку</label>
                             <label className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm text-sm font-semibold cursor-pointer hover:bg-gray-50 w-full md:w-auto">
                               <input
                                 type="file"
@@ -593,10 +590,10 @@ const Campaigns: React.FC = () => {
                               />
                               Загрузить изображение
                             </label>
-                            {card.imageBase64 && (
-                              <img src={card.imageBase64} alt={`Carousel ${idx + 1}`} className="h-28 w-full md:w-48 object-cover rounded border border-gray-200" />
+                            {card.imageUrl && (
+                              <img src={card.imageUrl} alt={`Carousel ${idx + 1}`} className="h-28 w-full md:w-48 object-cover rounded border border-gray-200" />
                             )}
-                            <p className="text-[11px] text-gray-500">Соотношение сторон 13:8, допуск ±2%, минимум 221x136 px.</p>
+                            <p className="text-[11px] text-gray-500">Картинка загружается на сервер и будет использована в карусели.</p>
                           </div>
 
                           <div className="space-y-3">
@@ -610,7 +607,7 @@ const Campaigns: React.FC = () => {
                               />
                             </div>
                             <div>
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Описание</label>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Описание (опционально)</label>
                               <input
                                 type="text"
                                 value={card.description}
@@ -619,20 +616,11 @@ const Campaigns: React.FC = () => {
                               />
                             </div>
                             <div>
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Текст кнопки</label>
-                              <input
-                                type="text"
-                                value={card.buttonLabel}
-                                onChange={(e) => handleCarouselFieldChange(idx, 'buttonLabel', e.target.value)}
-                                className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Ссылка кнопки</label>
+                              <label className="block text-xs font-semibold text-gray-600 mb-1">Ссылка (опционально)</label>
                               <input
                                 type="url"
-                                value={card.buttonLink}
-                                onChange={(e) => handleCarouselFieldChange(idx, 'buttonLink', e.target.value)}
+                                value={card.link}
+                                onChange={(e) => handleCarouselFieldChange(idx, 'link', e.target.value)}
                                 className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
                                 placeholder="https://example.com"
                               />
