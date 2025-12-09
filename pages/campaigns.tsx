@@ -289,10 +289,10 @@ const Campaigns: React.FC = () => {
       voiceUrl,
       voiceBase64,
       voiceName: newCampaign.voiceName,
-      carouselCards: carouselPayload,
+      carouselCards: carouselPayload
     };
 
-    console.log('SENDING CAROUSEL:', carouselPayload);
+    console.log('SENDING PAYLOAD:', payload);
 
     try {
       await fetch('/api/campaigns/send', {
