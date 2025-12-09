@@ -9,7 +9,8 @@ import { isDateInPeriod } from '../utils/dateHelpers';
 type MessageType = 'DEFAULT' | 'CAROUSEL';
 
 type CarouselCard = {
-  imageUrl: string;
+  imageUrl?: string;
+  imageFile?: File | null;
   title: string;
   description: string;
   link: string;
@@ -22,6 +23,7 @@ const Campaigns: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const createBlankCarouselCard = (): CarouselCard => ({
     imageUrl: '',
+    imageFile: null,
     title: '',
     description: '',
     link: '',
@@ -194,6 +196,10 @@ const Campaigns: React.FC = () => {
 
   const handleRemoveCarouselCard = (index: number) => {
     setNewCampaign(prev => {
+      if (prev.carousel.length <= 2) {
+        alert('В карусели должно быть минимум 2 карточки.');
+        return prev;
+      }
       const carousel = prev.carousel.filter((_, idx) => idx !== index);
       return { ...prev, carousel };
     });
@@ -205,7 +211,7 @@ const Campaigns: React.FC = () => {
       const uploaded = await uploadCampaignFile(file);
       setNewCampaign(prev => {
         const carousel = [...prev.carousel];
-        carousel[index] = { ...carousel[index], imageUrl: uploaded.url };
+        carousel[index] = { ...carousel[index], imageFile: file, imageUrl: uploaded.url };
         return { ...prev, carousel };
       });
     } catch (err) {
@@ -226,8 +232,8 @@ const Campaigns: React.FC = () => {
     setNewCampaign(prev => {
       let nextCarousel = prev.carousel;
       if (value === 'CAROUSEL') {
-        if (nextCarousel.length === 0) {
-          nextCarousel = [createBlankCarouselCard()];
+        if (nextCarousel.length < 2) {
+          nextCarousel = [createBlankCarouselCard(), createBlankCarouselCard()];
         }
         nextCarousel = nextCarousel.slice(0, 3);
       } else {
@@ -238,7 +244,7 @@ const Campaigns: React.FC = () => {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const trimmedImageUrl = newCampaign.imageUrl.trim();
@@ -250,15 +256,15 @@ const Campaigns: React.FC = () => {
 
     const isCarousel = newCampaign.type === 'CAROUSEL';
     if (isCarousel) {
-      if (newCampaign.carousel.length < 1) {
-        alert('Добавьте минимум 1 карточку для карусели.');
+      if (newCampaign.carousel.length < 2) {
+        alert('Добавьте минимум 2 карточки для карусели.');
         return;
       }
       if (newCampaign.carousel.length > 3) {
         alert('Максимум 3 карточки в карусели.');
         return;
       }
-      if (newCampaign.carousel.some(card => !card.imageUrl.trim() || !card.title.trim())) {
+      if (newCampaign.carousel.some(card => !card.imageUrl?.trim() || !card.title.trim())) {
         alert('Каждая карточка должна содержать изображение и заголовок.');
         return;
       }
@@ -272,6 +278,33 @@ const Campaigns: React.FC = () => {
           link: card.link,
         }))
       : [];
+
+    const payload = {
+      name: newCampaign.name,
+      campaignType: newCampaign.campaignType,
+      segment: newCampaign.segment,
+      message: newCampaign.message,
+      type: newCampaign.type,
+      imageUrl,
+      imageBase64,
+      imageName: newCampaign.imageName,
+      voiceUrl,
+      voiceBase64,
+      voiceName: newCampaign.voiceName,
+      carousel: newCampaign.carousel || [],
+    };
+
+    console.log('SENDING CAROUSEL:', newCampaign.carousel);
+
+    try {
+      await fetch('/api/campaigns/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (sendErr) {
+      console.error('Failed to send campaign', sendErr);
+    }
 
     const camp: Campaign = {
         id: `c${Date.now()}`,
