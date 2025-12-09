@@ -931,13 +931,12 @@ app.post('/api/campaigns/send', async (req, res) => {
         voiceName,
         filters = {},
         carousel = [],
-        carouselCards = [],
     } = req.body || {};
 
     const effectiveMessageType = messageType || (type === 'CAROUSEL' ? 'CAROUSEL' : 'DEFAULT');
     const effectiveCampaignType = campaignType || type;
     const isCarousel = effectiveMessageType === 'CAROUSEL';
-    const carouselItems = Array.isArray(carouselCards) ? carouselCards : (Array.isArray(carousel) ? carousel : []);
+    const carouselItems = Array.isArray(carousel) ? carousel : [];
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
