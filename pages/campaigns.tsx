@@ -87,6 +87,44 @@ const Campaigns: React.FC = () => {
     });
   };
 
+  const validateCarouselImage = async (file: File): Promise<string> => {
+    const dataUrl = await readFileAsDataUrl(file);
+
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        const { width, height } = image;
+        const minWidth = 221;
+        const minHeight = 136;
+        const targetRatio = 13 / 8;
+        const tolerance = 0.02;
+        const ratio = width / height;
+        const lowerBound = targetRatio * (1 - tolerance);
+        const upperBound = targetRatio * (1 + tolerance);
+
+        if (width < minWidth || height < minHeight) {
+          alert('Картинка слишком маленькая. Минимум 221x136 пикселей.');
+          reject(new Error('Image resolution too low'));
+          return;
+        }
+
+        if (ratio < lowerBound || ratio > upperBound) {
+          alert('Соотношение сторон должно быть 13:8 (±2%).');
+          reject(new Error('Invalid aspect ratio'));
+          return;
+        }
+
+        resolve(dataUrl);
+      };
+
+      image.onerror = () => {
+        reject(new Error('Не удалось загрузить изображение для проверки.'));
+      };
+
+      image.src = dataUrl;
+    });
+  };
+
   const handleImageFile = async (file?: File | null) => {
     if (!file) {
       setNewCampaign(prev => ({
