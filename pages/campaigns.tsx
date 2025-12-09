@@ -272,8 +272,8 @@ const Campaigns: React.FC = () => {
           .map(card => ({
             title: card.title,
             description: card.description,
-            image_url: card.imageUrl,
-            action: { type: 'open_link', link: card.actionLink },
+            imageUrl: card.imageUrl,
+            link: card.actionLink,
           }))
       : [];
 
@@ -289,7 +289,7 @@ const Campaigns: React.FC = () => {
       voiceUrl,
       voiceBase64,
       voiceName: newCampaign.voiceName,
-      carousel: carouselPayload,
+      carouselCards: carouselPayload,
     };
 
     console.log('SENDING CAROUSEL:', carouselPayload);
