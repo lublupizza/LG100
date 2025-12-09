@@ -746,62 +746,71 @@ const ensureOpusAudio = async ({ buffer, contentType, filename }) => {
 };
 
 const uploadCampaignImage = async ({ imageUrl, imageBase64, imageName } = {}) => {
-    const cleanUrl = (imageUrl || '').trim();
-    const cleanBase64 = (imageBase64 || '').trim();
+    try {
+        console.log("UPLOAD IMAGE STEP 1", { imageUrl, imageBase64 });
+        const cleanUrl = (imageUrl || '').trim();
+        const cleanBase64 = (imageBase64 || '').trim();
 
-    const ensureImageType = (contentType = 'application/octet-stream') => {
-        const normalized = (contentType || '').toLowerCase();
-        if (normalized && !normalized.startsWith('image')) {
-            throw new Error(`Invalid content-type for image: ${contentType}`);
+        const ensureImageType = (contentType = 'application/octet-stream') => {
+            const normalized = (contentType || '').toLowerCase();
+            if (normalized && !normalized.startsWith('image')) {
+                throw new Error(`Invalid content-type for image: ${contentType}`);
+            }
+            return normalized || 'application/octet-stream';
+        };
+
+        let buffer = null;
+        let contentType = 'image/jpeg';
+        let filename = imageName || 'campaign.jpg';
+
+        // 1. Файл, загруженный с компьютера (base64)
+        if (cleanBase64) {
+            const parsed = parseBase64DataUri(cleanBase64, contentType);
+            buffer = parsed?.buffer || null;
+            contentType = ensureImageType(parsed?.contentType || contentType);
         }
-        return normalized || 'application/octet-stream';
-    };
 
-    let buffer = null;
-    let contentType = 'image/jpeg';
-    let filename = imageName || 'campaign.jpg';
-
-    // 1. Файл, загруженный с компьютера (base64)
-    if (cleanBase64) {
-        const parsed = parseBase64DataUri(cleanBase64, contentType);
-        buffer = parsed?.buffer || null;
-        contentType = ensureImageType(parsed?.contentType || contentType);
-    }
-
-    // 2. URL — скачиваем изображение
-    if (!buffer && cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
-        if (cachedCampaignPhotoBuffers.has(cleanUrl)) {
-            const cached = cachedCampaignPhotoBuffers.get(cleanUrl);
-            buffer = cached.buffer;
-            contentType = ensureImageType(cached.contentType || contentType);
-            filename = cached.filename || filename;
-        } else {
-            const fetched = await fetchImageBuffer(cleanUrl);
-            buffer = fetched?.buffer || null;
-            contentType = ensureImageType(fetched?.contentType || contentType);
-            const entry = {
-                attachment: null,
-                buffer,
-                filename: `image.${pickExtension(contentType)}`,
-                contentType,
-            };
-            cachedCampaignPhotoBuffers.set(cleanUrl, entry);
-            filename = entry.filename;
+        // 2. URL — скачиваем изображение
+        if (!buffer && cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
+            if (cachedCampaignPhotoBuffers.has(cleanUrl)) {
+                const cached = cachedCampaignPhotoBuffers.get(cleanUrl);
+                buffer = cached.buffer;
+                contentType = ensureImageType(cached.contentType || contentType);
+                filename = cached.filename || filename;
+            } else {
+                const fetched = await fetchImageBuffer(cleanUrl);
+                console.log("UPLOAD IMAGE STEP 2 fetched", fetched ? { hasBuffer: !!fetched.buffer, contentType: fetched.contentType } : null);
+                buffer = fetched?.buffer || null;
+                console.log("UPLOAD IMAGE STEP 3 buffer", buffer ? buffer.length : "NO BUFFER");
+                contentType = ensureImageType(fetched?.contentType || contentType);
+                const entry = {
+                    attachment: null,
+                    buffer,
+                    filename: `image.${pickExtension(contentType)}`,
+                    contentType,
+                };
+                cachedCampaignPhotoBuffers.set(cleanUrl, entry);
+                filename = entry.filename;
+            }
         }
+
+        console.log("UPLOAD IMAGE STEP 4 — buffer exists?", !!buffer, "len:", buffer?.length);
+        if (!buffer || buffer.length === 0) {
+            throw new Error('Empty image buffer');
+        }
+
+        const ext = pickExtension(contentType || '', filename.split('.').pop() || 'jpg');
+        const safeFilename = filename.includes('.') ? filename : `campaign.${ext}`;
+
+        return {
+            attachment: null,
+            buffer,
+            filename: safeFilename,
+        };
+    } catch (err) {
+        console.error("UPLOAD IMAGE FATAL ERROR:", err);
+        throw err;
     }
-
-    if (!buffer || buffer.length === 0) {
-        throw new Error('Empty image buffer');
-    }
-
-    const ext = pickExtension(contentType || '', filename.split('.').pop() || 'jpg');
-    const safeFilename = filename.includes('.') ? filename : `campaign.${ext}`;
-
-    return {
-        attachment: null,
-        buffer,
-        filename: safeFilename,
-    };
 };
 
 const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName, peerId } = {}) => {
@@ -897,6 +906,13 @@ const uploadCampaignVoice = async ({ voiceUrl, voiceBase64, voiceName, peerId } 
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
+    console.log("CAMPAIGN IMAGE DEBUG:", {
+        imageUrl: req.body.imageUrl,
+        image_url: req.body.image_url,
+        imageBase64: req.body.imageBase64 ? req.body.imageBase64.slice(0,100) : null,
+        image_base64: req.body.image_base64 ? req.body.image_base64.slice(0,100) : null,
+        imageName: req.body.imageName,
+    });
     const {
         campaignId,
         message,
@@ -921,7 +937,8 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     const rawImage = (imageUrl || image_url || '').trim();
     const requestedImageBase64 = (imageBase64 || imageBase64Snake || (rawImage.startsWith('data:') ? rawImage : '')).trim();
-    const requestedImage = requestedImageBase64 ? '' : rawImage;
+    const requestedImage = (imageBase64 || imageBase64Snake) ? '' : rawImage;
+    console.log("UPLOAD DEBUG:", { rawImage, requestedImageBase64, requestedImage });
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
     let sharedPhotoBuffer = null;
@@ -939,32 +956,47 @@ app.post('/api/campaigns/send', async (req, res) => {
         }
     }
 
+    // =========================
+    // UPLOAD PHOTO TO VK (single correct block)
+    // =========================
+    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
+
+        console.log("VK PHOTO UPLOAD: starting…", {
+            filename: sharedPhotoFilename,
+            bufferLength: sharedPhotoBuffer?.length,
+        });
+
+        try {
+            const uploadedPhoto = await vk.upload.messagePhoto({
+                peer_id: 1,
+                source: {
+                    value: sharedPhotoBuffer,
+                    filename: sharedPhotoFilename,
+                }
+            });
+
+            console.log("VK PHOTO UPLOAD RESPONSE:", uploadedPhoto);
+            console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
+
+            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                sharedPhotoAttachment =
+                    `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}` +
+                    (uploadedPhoto.access_key ? `_${uploadedPhoto.access_key}` : '');
+
+                console.log("VK PHOTO ATTACH READY:", sharedPhotoAttachment);
+            } else {
+                console.warn("VK PHOTO UPLOAD: no owner_id/id returned");
+            }
+
+        } catch (err) {
+            console.error("VK PHOTO UPLOAD ERROR:", err);
+        }
+    }
+
     const voiceResult = await uploadCampaignVoice({ voiceUrl: requestedVoice, voiceBase64, voiceName });
     let voiceAttachment = voiceResult?.attachment || null;
     let voiceBuffer = voiceResult?.buffer;
     let voiceFilename = voiceResult?.filename;
-
-    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
-        try {
-            const uploadedPhoto = await vk.upload.messagePhoto({ source: { value: sharedPhotoBuffer, filename: sharedPhotoFilename } });
-            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                sharedPhotoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
-            }
-        } catch (sharedPhotoErr) {
-            console.warn('Shared photo upload failed', sharedPhotoErr?.message || sharedPhotoErr);
-        }
-    }
-
-    if (sharedPhotoBuffer && !sharedPhotoAttachment) {
-        try {
-            const uploadedPhoto = await vk.upload.messagePhoto({ source: { value: sharedPhotoBuffer, filename: sharedPhotoFilename } });
-            if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                sharedPhotoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
-            }
-        } catch (sharedPhotoErr) {
-            console.warn('Shared photo upload failed', sharedPhotoErr?.message || sharedPhotoErr);
-        }
-    }
 
     if ((requestedVoice || voiceBase64) && !voiceAttachment && !voiceBuffer) {
         try {
@@ -1012,13 +1044,18 @@ app.post('/api/campaigns/send', async (req, res) => {
                 finalPhotoAttachment = sharedPhotoAttachment;
             }
 
-            if (photoBuffer) {
+            // Используем глобально загруженное фото, без повторного peer upload
+            if (!photoAttachment && sharedPhotoAttachment) {
+                photoAttachment = sharedPhotoAttachment;
+            }
+
+            // Загружаем фото под конкретный peer, если есть готовый буфер
+            if (!photoAttachment && photoBuffer) {
                 try {
-                    if (!photoAttachment) {
-                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
-                        if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-                            photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
-                        }
+                    const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId || 1, source: { value: photoBuffer, filename: photoFilename } });
+                    console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
+                    if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
+                        photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
                     }
                 } catch (peerPhotoErr) {
                     console.warn('Peer-specific photo upload failed', peerPhotoErr?.message || peerPhotoErr);
@@ -1034,7 +1071,8 @@ app.post('/api/campaigns/send', async (req, res) => {
                         photoFilename = `image.${pickExtension(fetched.contentType)}`;
                         sharedPhotoBuffer = photoBuffer;
                         sharedPhotoFilename = photoFilename;
-                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId, source: { value: photoBuffer, filename: photoFilename } });
+                        const uploadedPhoto = await vk.upload.messagePhoto({ peer_id: user.vkId || 1, source: { value: photoBuffer, filename: photoFilename } });
+                        console.log("VK PHOTO UPLOAD RESULT:", uploadedPhoto);
                         if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
                             photoAttachment = `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}${uploadedPhoto.access_key ? '_' + uploadedPhoto.access_key : ''}`;
                         }
@@ -1049,6 +1087,7 @@ app.post('/api/campaigns/send', async (req, res) => {
                 finalPhotoAttachment = photoAttachment;
             }
 
+            console.log("FINAL PHOTO ATTACHMENT:", photoAttachment);
             // Если общий голосовой аттачмент отсутствует, но есть подготовленный буфер, пробуем загрузить под конкретный peer_id
             if (!voiceAttachment && voiceBuffer) {
                 try {
