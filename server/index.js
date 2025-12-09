@@ -952,12 +952,12 @@ app.post('/api/campaigns/send', async (req, res) => {
 
     // === FIXED VK CAROUSEL SUPPORT ===
     if (type === 'CAROUSEL') {
-        const carouselArray = Array.isArray(carouselCards) ? carouselCards : (Array.isArray(carousel) ? carousel : []);
-        console.log("CAROUSEL DEBUG:", carouselArray);
+        const carouselCardsArray = Array.isArray(carousel) ? carousel : [];
+        console.log("CAROUSEL DEBUG:", carouselCardsArray);
 
         const elements = [];
 
-        for (const card of carouselArray) {
+        for (const card of carouselCardsArray) {
             const { title, description, imageUrl: cardImageUrl, buttonLabel, buttonLink } = card || {};
 
             if (!cardImageUrl) {
