@@ -13,7 +13,7 @@ type CarouselCard = {
   imageFile?: File | null;
   title: string;
   description: string;
-  link: string;
+  actionLink: string;
 };
 
 const Campaigns: React.FC = () => {
@@ -26,7 +26,7 @@ const Campaigns: React.FC = () => {
     imageFile: null,
     title: '',
     description: '',
-    link: '',
+    actionLink: '',
   });
 
   const [newCampaign, setNewCampaign] = useState({
@@ -196,10 +196,6 @@ const Campaigns: React.FC = () => {
 
   const handleRemoveCarouselCard = (index: number) => {
     setNewCampaign(prev => {
-      if (prev.carousel.length <= 2) {
-        alert('В карусели должно быть минимум 2 карточки.');
-        return prev;
-      }
       const carousel = prev.carousel.filter((_, idx) => idx !== index);
       return { ...prev, carousel };
     });
@@ -232,8 +228,8 @@ const Campaigns: React.FC = () => {
     setNewCampaign(prev => {
       let nextCarousel = prev.carousel;
       if (value === 'CAROUSEL') {
-        if (nextCarousel.length < 2) {
-          nextCarousel = [createBlankCarouselCard(), createBlankCarouselCard()];
+        if (nextCarousel.length < 1) {
+          nextCarousel = [createBlankCarouselCard()];
         }
         nextCarousel = nextCarousel.slice(0, 3);
       } else {
@@ -256,12 +252,12 @@ const Campaigns: React.FC = () => {
 
     const isCarousel = newCampaign.type === 'CAROUSEL';
     if (isCarousel) {
-      if (newCampaign.carousel.length < 2) {
-        alert('Добавьте минимум 2 карточки для карусели.');
-        return;
-      }
       if (newCampaign.carousel.length > 3) {
         alert('Максимум 3 карточки в карусели.');
+        return;
+      }
+      if (newCampaign.carousel.length < 1) {
+        alert('Добавьте хотя бы 1 карточку для карусели.');
         return;
       }
       if (newCampaign.carousel.some(card => !card.imageUrl?.trim() || !card.title.trim())) {
@@ -271,12 +267,14 @@ const Campaigns: React.FC = () => {
     }
 
     const carouselPayload = isCarousel
-      ? newCampaign.carousel.map(card => ({
-          imageUrl: card.imageUrl,
-          title: card.title,
-          description: card.description,
-          link: card.link,
-        }))
+      ? newCampaign.carousel
+          .filter(card => card.imageUrl?.trim())
+          .map(card => ({
+            title: card.title,
+            description: card.description,
+            imageUrl: card.imageUrl,
+            action: { type: 'open_link', link: card.actionLink },
+          }))
       : [];
 
     const payload = {
@@ -291,10 +289,10 @@ const Campaigns: React.FC = () => {
       voiceUrl,
       voiceBase64,
       voiceName: newCampaign.voiceName,
-      carousel: newCampaign.carousel || [],
+      carousel: carouselPayload,
     };
 
-    console.log('SENDING CAROUSEL:', newCampaign.carousel);
+    console.log('SENDING CAROUSEL:', carouselPayload);
 
     try {
       await fetch('/api/campaigns/send', {
@@ -652,8 +650,8 @@ const Campaigns: React.FC = () => {
                               <label className="block text-xs font-semibold text-gray-600 mb-1">Ссылка (опционально)</label>
                               <input
                                 type="url"
-                                value={card.link}
-                                onChange={(e) => handleCarouselFieldChange(idx, 'link', e.target.value)}
+                                value={card.actionLink}
+                                onChange={(e) => handleCarouselFieldChange(idx, 'actionLink', e.target.value)}
                                 className="w-full bg-white border border-gray-300 rounded-lg p-2 text-sm focus:border-pizza-red focus:ring-1 focus:ring-pizza-red focus:outline-none"
                                 placeholder="https://example.com"
                               />
