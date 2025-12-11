@@ -72,7 +72,10 @@ export const launchCampaign = async (
   const voiceBase64 = (campaign as any).voice_base64;
   const voiceUrl = !voiceBase64 ? (((campaign as any).voice_url || (campaign as any).voiceUrl || '').trim()) : '';
   const messageType = (campaign as any).message_type || (campaign as any).messageType || 'DEFAULT';
-  const carousel = (campaign as any).carousel;
+  const carouselCards =
+  messageType === 'CAROUSEL'
+    ? (campaign as any).carouselCards || []
+    : [];
 
   const hydratedCampaign: Campaign = {
     ...campaign,
@@ -90,10 +93,13 @@ export const launchCampaign = async (
 
   const apiPayload = {
     campaignId: campaign.id,
-    message: campaign.message,
+  message:
+     messageType === 'CAROUSEL'
+    ? (campaign.message && campaign.message.trim() ? campaign.message : " ")
+    : campaign.message,    
     type: messageType === 'CAROUSEL' ? 'CAROUSEL' : campaign.type,
     messageType,
-    campaignType: campaign.type,
+    campaignType: campaign.campaignType || campaign.type,
     segment: campaign.segment_target,
     imageUrl,
     image_url: imageUrl,
@@ -105,7 +111,7 @@ export const launchCampaign = async (
     voiceBase64: voiceBase64,
     voiceName: (campaign as any).voice_name,
     filters,
-    carousel,
+    carouselCards,
   };
 
   const apiResult = await apiFetch<{ sent?: number; recipients?: any[] }>('/api/campaigns/send', {

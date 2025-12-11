@@ -41,7 +41,7 @@ const Campaigns: React.FC = () => {
     voiceUrl: '',
     voiceData: '',
     voiceName: '',
-    carousel: [] as CarouselCard[],
+    carouselCards: [] as CarouselCard[],
   });
 
   useEffect(() => {
@@ -184,61 +184,95 @@ const Campaigns: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleAddCarouselCard = () => {
-    setNewCampaign(prev => {
-      if (prev.carousel.length >= 3) {
-        alert('Карусель может содержать не более 3 карточек.');
-        return prev;
-      }
-      return { ...prev, carousel: [...prev.carousel, createBlankCarouselCard()] };
-    });
-  };
-
-  const handleRemoveCarouselCard = (index: number) => {
-    setNewCampaign(prev => {
-      const carousel = prev.carousel.filter((_, idx) => idx !== index);
-      return { ...prev, carousel };
-    });
-  };
-
-  const handleCarouselImageChange = async (index: number, file?: File | null) => {
-    if (!file) return;
-    try {
-      const uploaded = await uploadCampaignFile(file);
-      setNewCampaign(prev => {
-        const carousel = [...prev.carousel];
-        carousel[index] = { ...carousel[index], imageFile: file, imageUrl: uploaded.url };
-        return { ...prev, carousel };
-      });
-    } catch (err) {
-      console.error('Carousel image upload failed', err);
-      alert('Не удалось загрузить картинку. Попробуйте другой файл.');
+const handleAddCarouselCard = () => {
+  setNewCampaign(prev => {
+    if (prev.carouselCards.length >= 3) {
+      alert('Карусель может содержать не более 3 карточек.');
+      return prev;
     }
-  };
+    return {
+      ...prev,
+      carouselCards: [...prev.carouselCards, createBlankCarouselCard()],
+    };
+  });
+};
 
-  const handleCarouselFieldChange = (index: number, field: keyof CarouselCard, value: string) => {
+const handleRemoveCarouselCard = (index: number) => {
+  setNewCampaign(prev => {
+    const current = prev.carouselCards || [];
+    const updated = current.filter((_, idx) => idx !== index);
+    return {
+      ...prev,
+      carouselCards: updated,
+    };
+  });
+};
+
+const handleCarouselImageChange = async (index: number, file?: File | null) => {
+  if (!file) return;
+  try {
+    const uploaded = await uploadCampaignFile(file);
     setNewCampaign(prev => {
-      const carousel = [...prev.carousel];
-      carousel[index] = { ...carousel[index], [field]: value } as CarouselCard;
-      return { ...prev, carousel };
+      const current = prev.carouselCards || [];
+      const updated = [...current];
+      if (!updated[index]) return prev;
+
+      updated[index] = {
+        ...updated[index],
+        imageFile: file,
+        imageUrl: uploaded.url,
+      };
+
+      return {
+        ...prev,
+        carouselCards: updated,
+      };
     });
-  };
+  } catch (err) {
+    console.error('Carousel image upload failed', err);
+    alert('Не удалось загрузить картинку. Попробуйте другой файл.');
+  }
+};
 
-  const handleMessageTypeChange = (value: MessageType) => {
-    setNewCampaign(prev => {
-      let nextCarousel = prev.carousel;
-      if (value === 'CAROUSEL') {
-        if (nextCarousel.length < 1) {
-          nextCarousel = [createBlankCarouselCard()];
-        }
-        nextCarousel = nextCarousel.slice(0, 3);
-      } else {
-        nextCarousel = [];
+const handleCarouselFieldChange = (index: number, field: string, value: string) => {
+  setNewCampaign(prev => {
+    const updated = [...(prev.carouselCards || [])];
+
+    updated[index] = {
+      ...updated[index],
+      [field]: value,
+    };
+
+    return {
+      ...prev,
+      carouselCards: updated,
+    };
+  });
+};
+
+const handleMessageTypeChange = (value: MessageType) => {
+  setNewCampaign(prev => {
+    let nextCarousel = prev.carouselCards || [];
+
+    if (value === 'CAROUSEL') {
+      // Если включаем карусель и карточек нет — создаем новую
+      if (nextCarousel.length < 1) {
+        nextCarousel = [createBlankCarouselCard()];
       }
+      // Ограничиваем 3 карточками
+      nextCarousel = nextCarousel.slice(0, 3);
+    } else {
+      // Если включили обычный режим — карусель очищается
+      nextCarousel = [];
+    }
 
-      return { ...prev, type: value, carousel: nextCarousel };
-    });
-  };
+    return {
+      ...prev,
+      type: value,
+      carouselCards: nextCarousel,
+    };
+  });
+};
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -252,22 +286,22 @@ const Campaigns: React.FC = () => {
 
     const isCarousel = newCampaign.type === 'CAROUSEL';
     if (isCarousel) {
-      if (newCampaign.carousel.length > 3) {
+      if (newCampaign.carouselCards.length > 3) {
         alert('Максимум 3 карточки в карусели.');
         return;
       }
-      if (newCampaign.carousel.length < 1) {
+      if (newCampaign.carouselCards.length < 1) {
         alert('Добавьте хотя бы 1 карточку для карусели.');
         return;
       }
-      if (newCampaign.carousel.some(card => !card.imageUrl?.trim() || !card.title.trim())) {
+      if (newCampaign.carouselCards.some(card => !card.imageUrl?.trim() || !card.title.trim())) {
         alert('Каждая карточка должна содержать изображение и заголовок.');
         return;
       }
     }
 
     const carouselPayload = isCarousel
-      ? newCampaign.carousel
+      ? newCampaign.carouselCards
           .filter(card => card.imageUrl?.trim())
           .map(card => ({
             title: card.title,
@@ -281,57 +315,58 @@ const Campaigns: React.FC = () => {
       name: newCampaign.name,
       campaignType: newCampaign.campaignType,
       segment: newCampaign.segment,
-      message: newCampaign.message,
+      message: newCampaign.message || 'carousel',
       type: newCampaign.type,
+      messageType: newCampaign.type,
       imageUrl,
       imageBase64,
       imageName: newCampaign.imageName,
       voiceUrl,
       voiceBase64,
       voiceName: newCampaign.voiceName,
-      carousel: carouselPayload,
+      carouselCards: carouselPayload,
     };
+
+console.log("PAYLOAD DEBUG:", JSON.stringify(payload, null, 2));
+console.log("CAROUSEL DEBUG:", JSON.stringify(newCampaign.carouselCards, null, 2));
 
     console.log('SENDING CAROUSEL:', carouselPayload);
 
-    try {
-      await fetch('/api/campaigns/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (sendErr) {
-      console.error('Failed to send campaign', sendErr);
-    }
+// Отправку кампании тут отключили — теперь она запускается только вручную.
+// Создаём кампанию только в локальном списке — НЕ отправляем
+const camp: Campaign = {
+    id: `c${Date.now()}`,
+    name: newCampaign.name,
+    type: newCampaign.campaignType,
+    segment_target: newCampaign.segment as UserSegment | 'ALL',
+    message: newCampaign.message || 'carousel',
+    carouselCards: carouselPayload,
+    image_url: isCarousel ? undefined : (imageUrl || undefined),
+    image_base64: isCarousel ? undefined : (imageBase64 || undefined),
+    image_name: isCarousel ? undefined : (newCampaign.imageName || undefined),
+    voice_url: voiceUrl || undefined,
+    voice_base64: voiceBase64 || undefined,
+    voice_name: newCampaign.voiceName || undefined,
+    status: 'SCHEDULED',
+    stats: { sent: 0, delivered: 0, clicked: 0 },
+    created_at: new Date().toISOString()
+} as Campaign;
 
-    const camp: Campaign = {
-        id: `c${Date.now()}`,
-        name: newCampaign.name,
-        type: newCampaign.campaignType,
-        segment_target: newCampaign.segment as UserSegment | 'ALL',
-        message: newCampaign.message,
-        image_url: isCarousel ? undefined : (imageUrl || undefined),
-        image_base64: isCarousel ? undefined : (imageBase64 || undefined),
-        image_name: isCarousel ? undefined : (newCampaign.imageName || undefined),
-        voice_url: voiceUrl || undefined,
-        voice_base64: voiceBase64 || undefined,
-        voice_name: newCampaign.voiceName || undefined,
-        status: 'SCHEDULED',
-        stats: { sent: 0, delivered: 0, clicked: 0 },
-        created_at: new Date().toISOString()
-    } as Campaign;
-    const campWithExtras = {
-      ...camp,
-      message_type: newCampaign.type,
-      carousel: carouselPayload,
-    } as Campaign & { message_type: MessageType; carousel?: typeof carouselPayload };
-    setCampaigns(prev => {
-      const next = [campWithExtras as any, ...prev];
-      persistCampaigns(next);
-      return next;
-    });
+const campWithExtras = {
+    ...camp,
+    message_type: newCampaign.type,
+    messageType: newCampaign.type,
+    carouselCards: carouselPayload,
+} as Campaign & { message_type: MessageType; carousel?: typeof carouselPayload };
+
+setCampaigns(prev => {
+    const next = [campWithExtras as any, ...prev];
+    persistCampaigns(next);
+    return next;
+});
+
     setIsCreating(false);
-    setNewCampaign({ name: '', type: 'DEFAULT', campaignType: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '', carousel: [] });
+    setNewCampaign({ name: '', type: 'DEFAULT', campaignType: CampaignType.STANDARD, segment: 'ALL', message: '', imageUrl: '', imageData: '', imageName: '', voiceUrl: '', voiceData: '', voiceName: '', carouselCards: [] });
   };
 
   const handleLaunch = async (id: string) => {
@@ -588,15 +623,15 @@ const Campaigns: React.FC = () => {
                     type="button"
                     onClick={handleAddCarouselCard}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-50"
-                    disabled={newCampaign.carousel.length >= 3}
+                    disabled={newCampaign.carouselCards.length >= 3}
                   >
                     <Plus size={16} /> Добавить карточку
                   </button>
                 </div>
 
-                {newCampaign.carousel.length > 0 && (
+                {newCampaign.carouselCards.length > 0 && (
                   <div className="space-y-4">
-                    {newCampaign.carousel.map((card, idx) => (
+                    {newCampaign.carouselCards.map((card, idx) => (
                       <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-semibold text-gray-700">Карточка #{idx + 1}</div>
