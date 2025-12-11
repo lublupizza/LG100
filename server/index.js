@@ -31,6 +31,36 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, '../dist')));
 app.use('/api', cors(), express.json({ limit: '50mb' }), express.urlencoded({ extended: true }));
 
+// === IN-MEMORY CAMPAIGN STORAGE ===
+const campaigns = new Map();
+let nextCampaignId = 1;
+
+app.post('/api/campaigns', (req, res) => {
+    const payload = req.body || {};
+    const id = String(nextCampaignId++);
+    const campaign = { id, ...payload };
+    campaigns.set(id, campaign);
+    res.status(201).json(campaign);
+});
+
+app.get('/api/campaigns', (_req, res) => {
+    res.json(Array.from(campaigns.values()));
+});
+
+app.get('/api/campaigns/:id', (req, res) => {
+    const campaign = campaigns.get(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    res.json(campaign);
+});
+
+app.delete('/api/campaigns/:id', (req, res) => {
+    if (!campaigns.has(req.params.id)) {
+        return res.status(404).json({ error: 'Campaign not found' });
+    }
+    campaigns.delete(req.params.id);
+    res.json({ success: true });
+});
+
 // setup multer for image uploads
 const upload = multer({
     storage: multer.diskStorage({
