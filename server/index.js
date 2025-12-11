@@ -937,7 +937,7 @@ console.log('FULL CAMPAIGN REQUEST:', JSON.stringify(req.body,null,2));
 
     const effectiveMessageType = messageType || (type === 'CAROUSEL' ? 'CAROUSEL' : 'DEFAULT');
     const effectiveCampaignType = campaignType || type;
-    const isCarousel = effectiveMessageType === 'CAROUSEL';
+    const isCarousel = effectiveMessageType === 'CAROUSEL' || type === 'CAROUSEL';
     const carouselItems = Array.isArray(carouselCards) ? carouselCards : [];
 
     if (!message) return res.status(400).json({ error: 'Message is required' });
@@ -951,60 +951,81 @@ console.log('FULL CAMPAIGN REQUEST:', JSON.stringify(req.body,null,2));
     console.log("UPLOAD DEBUG:", { rawImage, requestedImageBase64, requestedImage });
     const requestedVoice = (voiceUrl || voice_url || '').trim();
 
-    if (type === 'CAROUSEL') {
+    if (isCarousel) {
         const carouselCardsArray = Array.isArray(carouselCards) ? carouselCards : [];
         console.log("CAROUSEL DEBUG:", carouselCardsArray);
 
         const elements = [];
 
+        const buildPhotoId = (photo) => {
+            const owner = photo?.owner_id ?? photo?.ownerId;
+            const id = photo?.id ?? photo?.photo_id ?? photo?.photoId;
+            const access = photo?.access_key ?? photo?.accessKey;
+            if (!owner || !id) return null;
+            return `photo${owner}_${id}${access ? `_${access}` : ''}`;
+        };
+
         for (const card of carouselCardsArray) {
-  const title = card?.title || "";
-  const description = card?.description || "";
-  const cardImageUrl = card?.imageUrl || null;
-  const link = card?.action?.link || card?.actionLink || null;
-  if (!cardImageUrl) {
-    console.warn('CAROUSEL WARNING: missing imageUrl for card');
-    continue;
-  }
+            const title = card?.title || "";
+            const description = card?.description || "";
+            const cardImageUrl = (card?.imageUrl || card?.image_url || '').trim();
+            const base64 = (card?.imageBase64 || card?.image_base64 || '').trim();
+            const link = card?.action?.link || card?.actionLink || card?.buttonLink || null;
 
-  try {
-    const fetched = await fetchImageBuffer(cardImageUrl);
-    const buffer = fetched?.buffer;
-    const filename = `carousel_${Date.now()}.${pickExtension(fetched?.contentType || 'image/jpeg')}`;
+            if (!cardImageUrl && !base64) {
+                console.warn('CAROUSEL WARNING: missing image for card');
+                continue;
+            }
 
-    if (!buffer || buffer.length === 0) {
-      console.warn('CAROUSEL WARNING: empty buffer for card');
-      continue;
-    }
+            try {
+                let buffer = null;
+                let filename = `carousel_${Date.now()}.${pickExtension('image/jpeg')}`;
 
-    const uploadedPhoto = await vk.upload.messagePhoto({
-      source: { value: buffer, filename },
-    });
+                if (base64) {
+                    const parsed = parseBase64DataUri(base64, 'image/jpeg');
+                    buffer = parsed?.buffer || null;
+                    filename = parsed?.filename || filename;
+                } else if (cardImageUrl) {
+                    const fetched = await fetchImageBuffer(cardImageUrl);
+                    buffer = fetched?.buffer || null;
+                    filename = `carousel_${Date.now()}.${pickExtension(fetched?.contentType || 'image/jpeg')}`;
+                }
 
-    console.log("CAROUSEL PHOTO UPLOAD:", uploadedPhoto);
+                if (!buffer || buffer.length === 0) {
+                    console.warn('CAROUSEL WARNING: empty buffer for card');
+                    continue;
+                }
 
-    if (uploadedPhoto?.owner_id && uploadedPhoto?.id) {
-      const photo_id =
-        `photo${uploadedPhoto.owner_id}_${uploadedPhoto.id}` +
-        (uploadedPhoto.access_key ? `_${uploadedPhoto.access_key}` : '');
+                const uploadedPhoto = await vk.upload.messagePhoto({
+                    source: { value: buffer, filename },
+                });
 
-      elements.push({
-        title,
-        description,
-        photo_id,
-        action: { type: 'open_link', link },
-      });
-    } else {
-      console.warn(
-        'CAROUSEL WARNING: upload returned without owner/id, skipping card'
-      );
-    }
-  } catch (err) {
-    console.error('Failed to process carousel card:', err.message || err);
-  }
-}
+                console.log("CAROUSEL PHOTO UPLOAD:", uploadedPhoto);
 
-const carouselObject = {
+                const photo_id = buildPhotoId(uploadedPhoto);
+
+                if (photo_id) {
+                    elements.push({
+                        title,
+                        description,
+                        photo_id,
+                        action: { type: 'open_link', link },
+                    });
+                } else {
+                    console.warn(
+                        'CAROUSEL WARNING: upload returned without owner/id, skipping card'
+                    );
+                }
+            } catch (err) {
+                console.error('Failed to process carousel card:', err.message || err);
+            }
+        }
+
+        if (elements.length === 0) {
+            return res.status(400).json({ error: 'No valid carousel cards' });
+        }
+
+        const carouselObject = {
             type: 'carousel',
             elements,
         };
@@ -1014,32 +1035,32 @@ const carouselObject = {
         let sent = 0;
         const errors = [];
 
-for (const user of audience) {
-    try {
-        await vk.api.messages.send({
-            user_id: user.vkId,
-            random_id: Date.now(),
+        for (const [idx, user] of audience.entries()) {
+            try {
+                await vk.api.messages.send({
+                    user_id: user.vkId,
+                    random_id: Date.now() + idx,
 
-            // VK требует наличие текста
-            message: " ",
+                    // VK требует наличие текста
+                    message: message?.trim() || " ",
 
-            // Карусель отправляется только через template
-            template: JSON.stringify({
-                type: "carousel",
-                elements,
-            }),
-        });
+                    // Карусель отправляется только через template
+                    template: JSON.stringify({
+                        type: "carousel",
+                        elements,
+                    }),
+                });
 
-        sent += 1;
+                sent += 1;
 
-    } catch (err) {
-        console.error('Failed to send carousel message', { user: user.vkId, err });
-        errors.push({
-            user: user.vkId,
-            message: err?.message || 'send_failed'
-        });
-    }
-}
+            } catch (err) {
+                console.error('Failed to send carousel message', { user: user.vkId, err });
+                errors.push({
+                    user: user.vkId,
+                    message: err?.message || 'send_failed'
+                });
+            }
+        }
 
         return res.json({
             sent,
@@ -1336,53 +1357,3 @@ async function start() {
     app.listen(PORT);
 }
 start();
-
-// КАРУСЕЛЬ ДЛЯ КНОПКИ СТАРТ — 100% РАБОТАЕТ
-app.post('/api/campaigns/send', async (req, res) => {
-  try {
-    const campaign = req.body.campaign || req.body;
-
-    if (campaign.type === "CAROUSEL" || campaign.messageType === "CAROUSEL") {
-      const cards = campaign.carouselCards || [];
-      if (cards.length === 0) return res.json({success: false, error: "Нет карточек"});
-
-      const userIds = await getTargetUserIds(campaign);
-      if (userIds.length === 0) return res.json({success: true, sent: 0});
-
-      const elements = [];
-      for (const card of cards) {
-        const resp = await fetch(card.imageUrl);
-        const buffer = Buffer.from(await resp.arrayBuffer());
-        const uploaded = await vk.upload.messagePhoto({source: {value: buffer, filename: "card.jpg"}});
-        const photo_id = `photo${uploaded.ownerId}_${uploaded.id}_${uploaded.accessKey}`;
-
-        elements.push({
-          title: card.title.substring(0,80),
-          description: (card.description || "").substring(0,220),
-          photo_id,
-          buttons: [[{
-            action: {type: "open_link", link: card.action?.link || "#"},
-            color: "primary",
-            label: "Подробнее"
-          }]]
-        });
-      }
-
-      await vk.api.messages.send({
-        peer_ids: userIds.join(","),
-        message: campaign.message || " ",
-        random_id: Date.now(),
-        template: {type: "carousel", elements}
-      });
-
-      return res.json({success: true, sent: userIds.length});
-    }
-
-    // Для остальных типов — твой старый код (он уже есть в файле)
-    res.json({success: false, message: "Тип не поддерживается"});
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({error: err.message});
-  }
-});
